@@ -136,7 +136,7 @@ function netCommands(net, game, pid) {
   return {
     smart(units, x, y, target) {
       send('smart', { u: ids(units), x, y, tg: target ? target.id : null });
-      return target ? (target.entity === 'node' ? 'gather' : target.owner !== pid ? 'attack' : 'build') : 'move';
+      return target ? (target.entity === 'node' ? 'gather' : game.isEnemy(pid, target.owner) ? 'attack' : 'build') : 'move';
     },
     move(units, x, y, attackMove) { send('move', { u: ids(units), x, y, am: !!attackMove }); },
     stop(units) { send('stop', { u: ids(units) }); },

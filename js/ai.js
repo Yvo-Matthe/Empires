@@ -155,7 +155,7 @@ class AIController {
       anchor = this.ctx.blds.find((b) => b.type === 'mill' && b.complete) || home;
       minR = 2; maxR = 12;
     } else if (type === 'tower') {
-      const enemy = START_POS[1 - this.pid];
+      const enemy = this.enemyStart();
       const a = Math.atan2(enemy.y * TILE - home.y, enemy.x * TILE - home.x) + (this.rng() - 0.5) * 1.6;
       anchor = { x: home.x + Math.cos(a) * 8 * TILE, y: home.y + Math.sin(a) * 8 * TILE };
       minR = 0; maxR = 5;
@@ -216,8 +216,9 @@ class AIController {
     const g = this.g, { p, blds, army } = this.ctx;
     // Keep a reserve for houses and new peasants.
     const reserve = { food: 60, wood: 40, stone: 0, gold: 0 };
-    const enemyCav = g.entities.filter((e) => e.entity === 'unit' && e.owner !== this.pid && e.def.tags.includes('cavalry')).length;
-    const enemyArch = g.entities.filter((e) => e.entity === 'unit' && e.owner !== this.pid && e.def.tags.includes('ranged')).length;
+    const foes = g.entities.filter((e) => e.entity === 'unit' && g.isEnemy(this.pid, e.owner));
+    const enemyCav = foes.filter((e) => e.def.tags.includes('cavalry')).length;
+    const enemyArch = foes.filter((e) => e.def.tags.includes('ranged')).length;
     if (army.length >= 60) return;
     for (const b of blds) {
       if (!b.complete || !b.def.trains || b.type === 'towncenter' || b.queue.length >= 2) continue;
@@ -265,11 +266,19 @@ class AIController {
     }
 
     // Everyone else gathers at a rally point in front of the base.
-    const enemy = START_POS[1 - this.pid];
+    const enemy = this.enemyStart();
     const a = Math.atan2(enemy.y * TILE - home.y, enemy.x * TILE - home.x);
     const rx = home.x + Math.cos(a) * 6 * TILE, ry = home.y + Math.sin(a) * 6 * TILE;
     const loiter = army.filter((u) => !this.wave.has(u.id) && !u.order && dist(u.x, u.y, rx, ry) > 4 * TILE);
     if (loiter.length) g.cmdMove(loiter, rx, ry);
+  }
+
+  // Start position of the nearest player still in the fight against us.
+  enemyStart() {
+    const g = this.g, me = START_POS[this.pid];
+    const foes = g.players.filter((p) => g.isEnemy(this.pid, p.id) && !p.defeated).map((p) => START_POS[p.id]);
+    if (!foes.length) return START_POS[(this.pid + 1) % g.players.length];
+    return foes.sort((a, b) => dist(a.x, a.y, me.x, me.y) - dist(b.x, b.y, me.x, me.y))[0];
   }
 
   attackTarget(from) {
@@ -277,7 +286,7 @@ class AIController {
     const origin = from || this.ctx.home;
     let best = null, bestD = Infinity;
     for (const e of g.entities) {
-      if (e.owner === this.pid || e.dead || e.entity !== 'building') continue;
+      if (!this.g.isEnemy(this.pid, e.owner) || e.dead || e.entity !== 'building') continue;
       const d = dist(e.x, e.y, origin.x, origin.y) + (e.type === 'tower' || e.type === 'castle' ? 15 * TILE : 0);
       if (d < bestD) { bestD = d; best = e; }
     }

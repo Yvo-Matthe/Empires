@@ -68,3 +68,27 @@ test('two AIs play a full game without errors', () => {
   assert.ok(maxArmy >= 8, 'AI raises an army');
   assert.ok(g.players.some((p) => p.stats.killed > 0), 'armies fight');
 });
+
+test('four players in two teams: allies share vision and do not fight', () => {
+  const g = new S.Game({ seed: 11, empires: ['aldermark', 'valmont', 'aldermark', 'valmont'], teams: [1, 2, 1, 2], ai: [true, true, true, true], difficulty: 'hard' });
+  assert.strictEqual(new Set(g.players.map((p) => p.color)).size, 4, 'every player gets a distinct color');
+  assert.ok(g.isAlly(0, 2) && g.isEnemy(0, 1) && !g.isEnemy(1, 3));
+  const tcs = g.entities.filter((e) => e.type === 'towncenter');
+  assert.strictEqual(tcs.length, 4);
+  for (let i = 0; i < 20 * 60 * 12 && !g.over; i++) { g.step(); g.events.length = 0; }
+  // Kills only ever happen between teams: allies never attack each other.
+  for (const e of g.entities) {
+    if (e.entity === 'unit' && e.order && e.order.type === 'attack' && e.order.target.owner !== undefined) {
+      assert.ok(g.isEnemy(e.owner, e.order.target.owner), 'unit is attacking an ally');
+    }
+  }
+  assert.ok(g.players.every((p) => p.stats.built > 3), 'all four AIs build');
+});
+
+test('forfeit ends the game only when one team is left', () => {
+  const g = new S.Game({ seed: 4, empires: ['aldermark', 'valmont', 'valmont'], teams: [1, 2, 2], ai: [false, false, true] });
+  g.forfeit(1, 'left');
+  assert.strictEqual(g.over, null);
+  g.forfeit(2, 'left');
+  assert.strictEqual(g.over.team, 1);
+});

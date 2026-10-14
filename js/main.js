@@ -51,6 +51,8 @@ function buildMenu() {
   $('mp-create').onclick = () => mpConnect({ t: 'create' });
   $('mp-join').onclick = () => mpConnect({ t: 'join', code: $('mp-code').value });
   $('mp-start').onclick = () => App.net && App.net.send({ t: 'start' });
+  $('mp-add-ai').onclick = () => App.net && App.net.send({ t: 'addAi' });
+  $('mp-difficulty').onchange = (e) => App.net && App.net.send({ t: 'difficulty', difficulty: e.target.value });
   $('mp-leave').onclick = () => mpDisconnect();
   try { $('mp-name').value = localStorage.getItem('empires.name') || ''; } catch { /* storage unavailable */ }
   if (location.protocol === 'file:') {
@@ -127,12 +129,35 @@ function renderLobby() {
   $('mp-lobby').classList.toggle('hidden', !l);
   if (!l) return;
   $('mp-room-code').textContent = l.code;
-  $('mp-players').innerHTML = [0, 1].map((i) => {
+  const used = [];
+  const rows = [];
+  for (let i = 0; i < l.max; i++) {
     const p = l.players[i];
-    if (!p) return '<li class="open">Waiting for a player to join…</li>';
-    const e = EMPIRES[p.empire];
-    return `<li><span class="dot" style="background:${e.color}"></span><b>${escapeHtml(p.name)}</b> ${i === 0 ? '(host)' : ''} · ${e.name}${i === App.slot ? ' · you' : ''}</li>`;
-  }).join('');
+    if (!p) { rows.push(`<tr class="open"><td colspan="4">Open slot: share the code or add an AI player</td></tr>`); continue; }
+    const editable = i === App.slot || (App.host && p.ai);
+    const color = pickColor(EMPIRES[p.empire].color, used);
+    const empireSel = `<select data-i="${i}" data-f="empire" ${editable ? '' : 'disabled'}>${Object.entries(EMPIRES)
+      .map(([k, e]) => `<option value="${k}" ${k === p.empire ? 'selected' : ''}>${e.name}</option>`).join('')}</select>`;
+    const teamSel = `<select data-i="${i}" data-f="team" ${editable ? '' : 'disabled'}>${Array.from({ length: l.max }, (_, t) =>
+      `<option value="${t + 1}" ${t + 1 === p.team ? 'selected' : ''}>Team ${t + 1}</option>`).join('')}</select>`;
+    const who = `<span class="dot" style="background:${color}"></span><b>${escapeHtml(p.name)}</b>${p.ai ? ' 🤖' : ''}${i === App.slot ? ' (you)' : ''}`;
+    const remove = App.host && p.ai ? `<button class="remove" data-i="${i}" title="Remove AI player">✕</button>` : '';
+    rows.push(`<tr><td>${who}</td><td>${empireSel}</td><td>${teamSel}</td><td>${remove}</td></tr>`);
+  }
+  $('mp-players').innerHTML = rows.join('');
+  $('mp-players').querySelectorAll('select').forEach((sel) => {
+    sel.onchange = () => {
+      const i = +sel.dataset.i, f = sel.dataset.f, v = f === 'team' ? +sel.value : sel.value;
+      if (i === App.slot) {
+        if (f === 'empire') selectEmpire(v);
+        else App.net.send({ t: 'team', team: v });
+      } else App.net.send({ t: 'setAi', i, [f]: v });
+    };
+  });
+  $('mp-players').querySelectorAll('.remove').forEach((b) => { b.onclick = () => App.net.send({ t: 'removeAi', i: +b.dataset.i }); });
+  $('mp-difficulty').value = l.difficulty;
+  $('mp-host-tools').classList.toggle('hidden', !App.host);
+  $('mp-add-ai').disabled = l.players.length >= l.max;
   $('mp-start').classList.toggle('hidden', !App.host);
   $('mp-start').disabled = l.players.length < 2;
   $('mp-wait').classList.toggle('hidden', !!App.host);
@@ -141,7 +166,8 @@ function renderLobby() {
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`); }
 
 function mpStart(m) {
-  const game = new Game({ seed: m.seed, empires: m.empires, ai: m.empires.map(() => false), viewer: m.you });
+  const game = new Game({ seed: m.seed, empires: m.empires, ai: m.ai, teams: m.teams, difficulty: m.difficulty, viewer: m.you });
+  game.ais = game.players.map(() => null); // the server plays the AI players
   game.players.forEach((p, i) => { p.name = m.names[i]; });
   const net = App.net;
   launch(game, m.you, netCommands(net, game, m.you), 'mp');
@@ -150,7 +176,8 @@ function mpStart(m) {
   net.on('notice', (n) => ui.message(n.text + '.', 'warn'));
   net.on('chat', (c) => ui.message(`${c.from}: ${c.text}`, 'chat'));
   net.on('lobby', (l) => { App.lobby = l; });
-  ui.message(`Battle begins! You lead the ${EMPIRES[m.empires[m.you]].name}. Press Enter to chat.`);
+  const allies = game.players.filter((p) => p.id !== m.you && game.isAlly(p.id, m.you)).map((p) => p.name);
+  ui.message(`Battle begins! You lead the ${EMPIRES[m.empires[m.you]].name}${allies.length ? `, allied with ${allies.join(', ')}` : ''}. Press Enter to chat.`);
 }
 
 // ---------- session ----------
@@ -192,7 +219,7 @@ function showEnd() {
   const s = App.session;
   s.ended = true;
   const g = s.game, me = s.ui.player, over = g.over;
-  const won = over.winner === me;
+  const won = over.team != null ? g.players[me].team === over.team : over.winner === me;
   $('end-title').textContent = won ? 'Victory!' : over.winner === -1 ? 'Game Over' : 'Defeat';
   $('end-title').className = won ? 'win' : 'lose';
   $('end-reason').textContent = over.reason || (won ? 'The enemy Town Center has fallen. Your empire reigns supreme.' : 'Your strongholds have fallen.');

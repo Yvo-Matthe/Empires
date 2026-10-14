@@ -41,8 +41,19 @@
           <button id="mp-join">Join Room</button>
         </div>
         <div id="mp-lobby" class="hidden">
-          <div>Room code: <b id="mp-room-code" class="room-code"></b> <span class="hint">Share this code with your opponent.</span></div>
-          <ul id="mp-players"></ul>
+          <div>Room code: <b id="mp-room-code" class="room-code"></b> <span class="hint">Share this code with the other players.</span></div>
+          <table id="mp-players"></table>
+          <div id="mp-host-tools">
+            <button id="mp-add-ai">Add AI Player</button>
+            <label>AI difficulty
+              <select id="mp-difficulty">
+                <option value="easy">Easy</option>
+                <option value="normal" selected>Normal</option>
+                <option value="hard">Hard</option>
+              </select>
+            </label>
+          </div>
+          <div class="hint">Players on the same team are allies. Up to 4 players, humans and AI in any mix.</div>
           <button id="mp-start" class="primary">Start Battle</button>
           <span id="mp-wait" class="hint">Waiting for the host to start…</span>
           <button id="mp-leave">Leave Room</button>

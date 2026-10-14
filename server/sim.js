@@ -15,7 +15,7 @@ function loadSim() {
   }
   // Script-level const/class declarations are not properties of the context, so collect them.
   return vm.runInContext(`({ Game, Pathfinder, generateMap, mapConnected, makeSnapshot, EMPIRES, UNITS, BUILDINGS,
-    DIFFICULTY, TILE, MAP_W, MAP_H, TICK, START_POS })`, ctx);
+    DIFFICULTY, TILE, MAP_W, MAP_H, TICK, START_POS, MAX_PLAYERS })`, ctx);
 }
 
 module.exports = { loadSim };

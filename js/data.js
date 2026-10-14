@@ -131,7 +131,13 @@ const EMPIRES = {
   },
 };
 
-const ALT_COLORS = ['#8e44ad', '#16a085'];
+const PLAYER_COLORS = ['#2f6fd6', '#c0392b', '#8e44ad', '#16a085', '#d35400', '#7f8c8d'];
+
+function pickColor(preferred, used) {
+  const c = used.includes(preferred) ? PLAYER_COLORS.find((x) => !used.includes(x)) : preferred;
+  used.push(c);
+  return c;
+}
 
 const DIFFICULTY = {
   easy: { name: 'Easy', gather: 0.8, firstAttack: 600, waveStart: 5, workers: 18 },

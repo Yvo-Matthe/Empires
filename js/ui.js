@@ -123,7 +123,7 @@ class UI {
     if (this.mode === 'attackMove') {
       const units = this.myUnits();
       const t = this.pick(w.x, w.y);
-      if (t && t.entity !== 'node' && t.owner !== this.player) this.cmd.smart(units, w.x, w.y, t);
+      if (t && t.entity !== 'node' && this.game.isEnemy(this.player, t.owner)) this.cmd.smart(units, w.x, w.y, t);
       else this.cmd.move(units, w.x, w.y, true);
       this.r.markers.push({ x: w.x, y: w.y, t: performance.now(), color: '#ff5a5a' });
       if (!e.shiftKey) this.mode = null;
@@ -196,7 +196,7 @@ class UI {
     const g = this.game;
     if (units.length) {
       const kind = this.cmd.smart(units, x, y, target);
-      const color = target && target.entity !== 'node' && target.owner !== this.player ? '#ff5a5a' : target ? '#ffe680' : '#7CFC6A';
+      const color = target && target.entity !== 'node' && g.isEnemy(this.player, target.owner) ? '#ff5a5a' : target ? '#ffe680' : '#7CFC6A';
       this.r.markers.push({ x: target ? target.x : x, y: target ? target.y : y, t: performance.now(), color });
       return kind;
     }
@@ -311,7 +311,7 @@ class UI {
       this.hover = this.placing ? null : this.pick(this.mouseWorld.x, this.mouseWorld.y);
     }
     this.r.canvas.style.cursor = this.mode === 'attackMove' ? 'crosshair' :
-      this.hover && this.hover.owner !== this.player && this.hover.entity !== 'node' && this.myUnits().length ? 'crosshair' : 'default';
+      this.hover && this.hover.entity !== 'node' && this.game.isEnemy(this.player, this.hover.owner) && this.myUnits().length ? 'crosshair' : 'default';
 
     this.panelT -= dt;
     if (this.panelT <= 0) {

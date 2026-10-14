@@ -43,9 +43,12 @@ h2 { color: var(--gold); font-weight: normal; letter-spacing: 2px; }
 #mp-panel { flex-direction: column; }
 #mp-form, #mp-lobby { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; }
 #mp-lobby { flex-direction: column; }
-#mp-players { list-style: none; padding: 0; margin: 0; text-align: left; }
-#mp-players li { padding: 4px 0; }
-#mp-players li.open { color: var(--muted); font-style: italic; }
+#mp-players { border-collapse: collapse; text-align: left; }
+#mp-players td { padding: 4px 8px; }
+#mp-players tr.open td { color: var(--muted); font-style: italic; }
+#mp-players select { padding: 3px 6px; }
+#mp-players .remove { padding: 2px 8px; }
+#mp-host-tools { display: flex; gap: 12px; align-items: center; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
 .room-code { font-size: 26px; letter-spacing: 6px; color: var(--gold); }
 .code-input { width: 90px; text-transform: uppercase; letter-spacing: 4px; text-align: center; }

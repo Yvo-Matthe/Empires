@@ -11,10 +11,19 @@ const B_WATER = 1;
 const B_NODE = 2;
 const B_BUILDING = 3;
 
-const START_POS = [
-  { x: 13, y: 82 },
-  { x: MAP_W - 1 - 13, y: MAP_H - 1 - 82 },
-];
+// The map has 4-fold rotational symmetry, so up to four players start on equal ground.
+// Players 0 and 1 sit in opposite corners, which keeps 1v1 games as far apart as possible.
+const rotate = (x, y) => [MAP_W - 1 - y, x]; // 90 degrees around the map centre
+const rotations = (x, y) => {
+  const out = [[x, y]];
+  for (let k = 0; k < 3; k++) out.push(rotate(...out[k]));
+  return out; // [original, 90, 180, 270]
+};
+const START_POS = (() => {
+  const r = rotations(13, 82);
+  return [r[0], r[2], r[1], r[3]].map(([x, y]) => ({ x, y }));
+})();
+const MAX_PLAYERS = START_POS.length;
 
 function makeNoise(rng, cell) {
   const gw = Math.ceil(MAP_W / cell) + 2;
@@ -52,9 +61,9 @@ function tryGenerateMap(seed) {
 
   const baseDist = (x, y) => Math.min(...START_POS.map((p) => Math.hypot(x - p.x, y - p.y)));
 
-  // Fill the first half of the tiles, then mirror through the map centre.
-  for (let i = 0; i < N / 2; i++) {
-    const x = i % MAP_W, y = Math.floor(i / MAP_W);
+  // Fill the bottom-left quadrant, then rotate it into the other three.
+  for (let y = MAP_H / 2; y < MAP_H; y++) for (let x = 0; x < MAP_W / 2; x++) {
+    const i = y * MAP_W + x;
     const bd = baseDist(x, y);
     let t = T_GRASS, kind = null;
     const edge = Math.min(x, y, MAP_W - 1 - x, MAP_H - 1 - y);
@@ -64,17 +73,15 @@ function tryGenerateMap(seed) {
       const f = forestA(x, y) * 0.75 + forestB(x, y) * 0.25;
       if ((f > 0.6 || edge < 2) && bd > 9) kind = 'tree';
     }
-    terrain[i] = t;
-    nodeKind[i] = kind;
-  }
-  for (let i = 0; i < N / 2; i++) {
-    terrain[N - 1 - i] = terrain[i];
-    nodeKind[N - 1 - i] = nodeKind[i];
+    for (const [rx, ry] of rotations(x, y)) {
+      terrain[ry * MAP_W + rx] = t;
+      nodeKind[ry * MAP_W + rx] = kind;
+    }
   }
 
-  // Starting resources around each base (defined for player 0, mirrored for player 1).
+  // Starting resources around each base (defined for player 0, rotated for the others).
   const place = (x, y, kind) => {
-    for (const [px, py] of [[x, y], [MAP_W - 1 - x, MAP_H - 1 - y]]) {
+    for (const [px, py] of rotations(x, y)) {
       if (px < 1 || py < 1 || px >= MAP_W - 1 || py >= MAP_H - 1) continue;
       const i = py * MAP_W + px;
       terrain[i] = T_GRASS;
@@ -131,14 +138,15 @@ function tryGenerateMap(seed) {
 function mapConnected(map) {
   const N = map.w * map.h;
   const seen = new Uint8Array(N);
-  const a = START_POS[0], b = START_POS[1];
+  const a = START_POS[0];
   const start = (a.y + 3) * map.w + a.x;
-  const goal = (b.y - 3) * map.w + b.x;
+  // Every base must be reachable from the first one (checked just below each Town Center).
+  const goals = new Set(START_POS.slice(1).map((p) => (p.y + 3) * map.w + p.x));
   const q = [start];
   seen[start] = 1;
   while (q.length) {
     const i = q.pop();
-    if (i === goal) return true;
+    if (goals.delete(i) && !goals.size) return true;
     const x = i % map.w, y = (i / map.w) | 0;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx, ny = y + dy;

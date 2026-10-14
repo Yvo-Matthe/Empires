@@ -8,8 +8,8 @@ const WebSocket = require('ws');
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 
-function client() {
-  const ws = new WebSocket(`ws://localhost:${PORT}/ws`);
+function client(port = PORT) {
+  const ws = new WebSocket(`ws://localhost:${port}/ws`);
   const inbox = [];
   const waiters = [];
   ws.on('message', (raw) => {
@@ -59,5 +59,40 @@ test('two players can create, join and play a room', async (t) => {
   b.ws.close();
   const end = await a.next('snap', (s) => s.over);
   assert.strictEqual(end.over.winner, 0);
+  a.ws.close();
+});
+
+test('a host can fill a room with AI players and teams', async (t) => {
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'server', 'index.js')], { env: { ...process.env, PORT: PORT + 1 } });
+  t.after(() => srv.kill());
+  await new Promise((r) => srv.stdout.once('data', r));
+  const a = client(PORT + 1), b = client(PORT + 1);
+  await Promise.all([a.open, b.open]);
+  a.send({ t: 'create', name: 'Host', empire: 'aldermark' });
+  const { code } = await a.next('lobby');
+  b.send({ t: 'join', code, name: 'Guest', empire: 'valmont' });
+  await a.next('lobby', (m) => m.players.length === 2);
+  // Guests cannot add AI players.
+  b.send({ t: 'addAi' });
+  a.send({ t: 'addAi' });
+  a.send({ t: 'addAi' });
+  let l = await a.next('lobby', (m) => m.players.length === 4);
+  assert.ok(l.players[2].ai && l.players[3].ai);
+  // Humans together on team 1 against two AIs on team 2.
+  b.send({ t: 'team', team: 1 });
+  a.send({ t: 'setAi', i: 2, team: 2, empire: 'valmont' });
+  a.send({ t: 'setAi', i: 3, team: 2 });
+  a.send({ t: 'difficulty', difficulty: 'hard' });
+  l = await a.next('lobby', (m) => m.difficulty === 'hard' && m.players.map((p) => p.team).join() === '1,1,2,2');
+  a.send({ t: 'start' });
+  const st = await b.next('start');
+  assert.deepStrictEqual(st.teams, [1, 1, 2, 2]);
+  assert.deepStrictEqual(st.ai, [false, false, true, true]);
+  // The AI players are running on the server: they train peasants.
+  await a.next('snap', (s) => s.e.filter((e) => e.t === 'peasant' && e.o >= 2).length > 8);
+  // One human leaving does not end a team game.
+  b.ws.close();
+  const s = await a.next('snap', (x) => x.pl[1].d);
+  assert.strictEqual(s.over, null);
   a.ws.close();
 });

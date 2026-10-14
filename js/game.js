@@ -4,7 +4,10 @@
 const INTERACT = 18; // px, edge distance at which peasants gather/build/drop off
 
 class Game {
-  constructor({ seed = 1, empires = ['aldermark', 'valmont'], difficulty = 'normal', ai = [false, true], viewer } = {}) {
+  constructor({ seed = 1, empires = ['aldermark', 'valmont'], difficulty = 'normal', ai = [false, true], teams, viewer } = {}) {
+    if (empires.length < 2 || empires.length > MAX_PLAYERS) throw new Error(`A game needs 2-${MAX_PLAYERS} players`);
+    // Players on the same team are allies; by default everyone fights alone.
+    teams = teams || empires.map((_, i) => i + 1);
     this.seed = seed;
     this.map = generateMap(seed);
     this.time = 0;
@@ -26,10 +29,11 @@ class Game {
     this.viewer = viewer !== undefined ? viewer : ai.indexOf(false);
     this.defCache = new Map();
 
+    const usedColors = [];
     this.players = empires.map((key, id) => ({
-      id, empireKey: key, empire: EMPIRES[key], trim: EMPIRES[key].trim,
-      // Mirror matches get a second banner color.
-      color: empires.indexOf(key) < id ? ALT_COLORS[id % ALT_COLORS.length] : EMPIRES[key].color,
+      id, empireKey: key, empire: EMPIRES[key], trim: EMPIRES[key].trim, team: teams[id],
+      // Players sharing an empire get distinct banner colors.
+      color: pickColor(EMPIRES[key].color, usedColors),
       res: { food: 200, wood: 200, stone: 150, gold: 100 },
       pop: 0, popCap: 0, defeated: false, ai: ai[id],
       stats: { trained: 0, killed: 0, lost: 0, gathered: 0, built: 0 },
@@ -47,6 +51,9 @@ class Game {
     this.updatePop();
     this.computeVision();
   }
+
+  isEnemy(a, b) { return a !== b && this.players[a].team !== this.players[b].team; }
+  isAlly(a, b) { return a === b || this.players[a].team === this.players[b].team; }
 
   // ---------- stats with empire modifiers ----------
   unitDef(pid, type) {
@@ -216,7 +223,7 @@ class Game {
   cmdSmart(pid, units, x, y, target) {
     units = units.filter((u) => u.entity === 'unit' && u.owner === pid && !u.dead);
     if (!units.length) return null;
-    if (target && target.entity !== 'node' && target.owner !== pid) {
+    if (target && target.entity !== 'node' && this.isEnemy(pid, target.owner)) {
       this.cmdAttack(units, target);
       return 'attack';
     }
@@ -417,7 +424,7 @@ class Game {
   findEnemy(u, radius, includeBuildings = true) {
     let best = null, bestScore = Infinity;
     for (const e of this.entities) {
-      if (e.dead || e.owner === u.owner) continue;
+      if (e.dead || !this.isEnemy(u.owner, e.owner)) continue;
       if (e.entity === 'building' && !includeBuildings) continue;
       const d = this.edgeDist(u, e);
       if (d > radius) continue;
@@ -508,7 +515,7 @@ class Game {
     if (target.hp <= 0) { this.kill(target, attacker); return; }
     // Idle soldiers fight back; peasants keep working.
     if (target.entity === 'unit' && !target.def.worker && attacker && attacker.entity === 'unit' && !attacker.dead &&
-        (!target.order || target.order.type === 'move' && target.owner !== 0)) {
+        (!target.order || target.order.type === 'move' && this.players[target.owner].ai)) {
       this.setOrder(target, { type: 'attack', target: attacker, auto: { x: target.x, y: target.y } });
     }
     const ai = this.ais[target.owner];
@@ -807,7 +814,7 @@ class Game {
         b.cooldown = 0.4;
         let best = null, bestD = atk.range * TILE;
         for (const e of this.entities) {
-          if (e.entity !== 'unit' || e.dead || e.owner === b.owner) continue;
+          if (e.entity !== 'unit' || e.dead || !this.isEnemy(b.owner, e.owner)) continue;
           const dx = Math.max(b.x0 - e.x, 0, e.x - b.x1), dy = Math.max(b.y0 - e.y, 0, e.y - b.y1);
           const d = Math.hypot(dx, dy);
           if (d < bestD) { bestD = d; best = e; }
@@ -845,7 +852,7 @@ class Game {
     if (human < 0) { this.visible.fill(1); this.explored.fill(1); return; }
     this.visible.fill(0);
     for (const e of this.entities) {
-      if (e.owner !== human || e.dead) continue;
+      if (e.dead || !this.isAlly(e.owner, human)) continue;
       const r = e.def.sight + (e.entity === 'building' ? e.size / 2 : 0);
       const cx = e.x / TILE, cy = e.y / TILE;
       const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(MAP_W - 1, Math.ceil(cx - 1 + r));
@@ -873,7 +880,23 @@ class Game {
         this.events.push({ type: 'defeated', player: p.id });
       }
     }
+    this.checkTeams();
+  }
+
+  // The game ends once every surviving player is on one team.
+  checkTeams(reason) {
+    if (this.over) return;
     const left = this.players.filter((p) => !p.defeated);
-    if (left.length <= 1) this.over = { winner: left.length ? left[0].id : -1, time: this.time };
+    if (new Set(left.map((p) => p.team)).size <= 1) {
+      this.over = { winner: left.length ? left[0].id : -1, team: left.length ? left[0].team : null, time: this.time, reason };
+    }
+  }
+
+  forfeit(pid, reason) {
+    const p = this.players[pid];
+    if (p.defeated) return;
+    p.defeated = true;
+    this.events.push({ type: 'defeated', player: pid });
+    this.checkTeams(reason);
   }
 }

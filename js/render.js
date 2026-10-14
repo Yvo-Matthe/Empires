@@ -174,7 +174,7 @@ class Renderer {
     c.drawImage(this.terrain, vx0, vy0, vx1 - vx0, vy1 - vy0, vx0, vy0, vx1 - vx0, vy1 - vy0);
 
     const inView = (e, pad) => e.x > cam.x - pad && e.x < cam.x + this.viewW + pad && e.y > cam.y - pad && e.y < cam.y + this.viewH + pad;
-    const shown = (e) => e.owner === ui.player || (e.entity === 'building' ? g.explored[Math.floor(e.y / TILE) * MAP_W + Math.floor(e.x / TILE)] : g.isVisible(e));
+    const shown = (e) => g.isAlly(e.owner, ui.player) || (e.entity === 'building' ? g.explored[Math.floor(e.y / TILE) * MAP_W + Math.floor(e.x / TILE)] : g.isVisible(e));
     const sel = ui.selection;
 
     // Ground-level things first.
@@ -185,7 +185,7 @@ class Renderer {
       else list.push(e);
     }
     // Selection rings under units.
-    for (const e of sel) if (!e.dead) this.drawSelection(c, e, e.owner === ui.player ? '#7CFC6A' : e.owner === undefined ? '#ffe680' : '#ff5a5a');
+    for (const e of sel) if (!e.dead) this.drawSelection(c, e, e.owner === ui.player ? '#7CFC6A' : e.owner === undefined ? '#ffe680' : g.isAlly(e.owner, ui.player) ? '#6ab0ff' : '#ff5a5a');
     if (ui.hover && !sel.includes(ui.hover) && !ui.hover.dead) this.drawSelection(c, ui.hover, 'rgba(255,255,255,0.5)');
 
     list.sort((a, b) => (a.entity === 'building' ? a.y1 - 4 : a.y) - (b.entity === 'building' ? b.y1 - 4 : b.y));

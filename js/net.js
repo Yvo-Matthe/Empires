@@ -14,7 +14,7 @@ function makeSnapshot(game) {
       const o = en.order, t = o && o.target;
       return {
         i: en.id, k: 0, t: en.type, o: en.owner, x: Math.round(en.x), y: Math.round(en.y), h: Math.ceil(en.hp),
-        f: en.facing, m: en.moving ? 1 : 0, a: en.attackAnim > 0 ? 1 : 0, w: en.working ? 1 : 0, lh,
+        f: en.facing, g: en.female ? 1 : 0, m: en.moving ? 1 : 0, a: en.attackAnim > 0 ? 1 : 0, w: en.working ? 1 : 0, lh,
         c: en.carry.amount > 0 ? [en.carry.res, Math.floor(en.carry.amount)] : 0,
         r: o ? [o.type, t && t.entity === 'node' ? t.res : t && t.def && t.def.farm ? 'food' : 0] : 0,
       };
@@ -62,6 +62,7 @@ function applySnapshot(game, s) {
       en.fx = en.x; en.fy = en.y; en.nx = d.x; en.ny = d.y; en.t0 = now;
       if (Math.abs(en.nx - en.x) + Math.abs(en.ny - en.y) > 96) { en.x = en.fx = en.nx; en.y = en.fy = en.ny; }
       en.facing = d.f;
+      en.female = !!d.g;
       en.moving = !!d.m;
       if (d.a && !(en.attackAnim > 0)) en.attackAnim = 0.25;
       en.working = !!d.w;

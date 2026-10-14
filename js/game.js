@@ -42,10 +42,13 @@ class Game {
     for (const p of this.players) {
       const s = START_POS[p.id];
       const tc = this.addBuilding(p.id, 'towncenter', s.x - 2, s.y - 2, true);
+      // Two men and two women to work the land, and the leader: the player in the game.
       for (let i = 0; i < 4; i++) {
         const a = (i / 4) * Math.PI * 2 + (p.id ? Math.PI : 0);
         this.addUnit(p.id, 'peasant', tc.x + Math.cos(a) * 3 * TILE, tc.y + Math.sin(a) * 3 * TILE);
       }
+      const toCenter = Math.atan2(MAP_H * TILE / 2 - tc.y, MAP_W * TILE / 2 - tc.x);
+      p.leaderId = this.addUnit(p.id, 'leader', tc.x + Math.cos(toCenter) * 4 * TILE, tc.y + Math.sin(toCenter) * 4 * TILE).id;
     }
     this.ais = this.players.map((p) => (p.ai ? new AIController(this, p.id) : null));
     this.updatePop();
@@ -64,6 +67,10 @@ class Game {
       d = { ...UNITS[type], type };
       d.hp = Math.round(d.hp * ((mods.unitHp || {})[type] || 1));
       d.range += (mods.unitRange || {})[type] || 0;
+      d.speed *= (mods.unitSpeed || {})[type] || 1;
+      const cm = (mods.unitCost || {})[type] || 1;
+      d.cost = Object.fromEntries(Object.entries(d.cost).map(([k, v]) => [k, Math.round(v * cm)]));
+      if (type === 'leader') d.name = this.players[pid].empire.leader;
       this.defCache.set(key, d);
     }
     return d;
@@ -102,6 +109,8 @@ class Game {
       carry: { res: null, amount: 0 }, cooldown: 0, scanT: Math.random() * 0.5, repathT: 0,
       facing: 1, moving: false, anim: Math.random() * 10, lastHit: -99, attackAnim: 0,
     };
+    // The workforce is men and women in turn.
+    if (def.worker) { const p = this.players[pid]; u.female = (p.workers = (p.workers || 0) + 1) % 2 === 0; }
     this.entities.push(u);
     this.byId.set(u.id, u);
     return u;
@@ -279,6 +288,7 @@ class Game {
   }
 
   cmdDelete(e) {
+    if (e.type === 'leader') return; // a leader cannot abdicate
     if (e.entity === 'building' && !e.complete) refund(this.players[e.owner].res, this.buildingCost(e.owner, e.type), e.progress < 0.01 ? 1 : 0.5);
     this.kill(e, null);
   }
@@ -388,6 +398,7 @@ class Game {
     if (u.attackAnim > 0) u.attackAnim -= dt;
     u.moving = false;
     u.working = false;
+    if (u.def.regen && u.hp < u.maxHp && this.time - u.lastHit > 6) u.hp = Math.min(u.maxHp, u.hp + u.def.regen * dt);
     const o = u.order;
     if (!o) return this.idle(u, dt);
     switch (o.type) {
@@ -541,6 +552,7 @@ class Game {
     }
     if (killer && killer.owner !== undefined && killer.owner !== e.owner) this.players[killer.owner].stats.killed++;
     this.events.push({ type: 'death', id: e.id, owner: e.owner });
+    if (e.type === 'leader' && !p.defeated && killer !== null) this.forfeit(e.owner, `${e.def.name} has fallen in battle`);
   }
 
   removeDead() {
@@ -870,15 +882,11 @@ class Game {
     return this.visible[i] === 1;
   }
 
+  // A player is out when their leader dies (see kill) or nothing of theirs is left standing.
   checkVictory() {
     for (const p of this.players) {
       if (p.defeated) continue;
-      const alive = this.entities.some((e) => e.owner === p.id && e.entity === 'building' && !e.dead &&
-        (e.type === 'towncenter' || e.type === 'castle'));
-      if (!alive) {
-        p.defeated = true;
-        this.events.push({ type: 'defeated', player: p.id });
-      }
+      if (!this.entities.some((e) => e.owner === p.id && !e.dead)) this.forfeit(p.id, `${p.empire.name} has been wiped out`);
     }
     this.checkTeams();
   }
@@ -896,7 +904,10 @@ class Game {
     const p = this.players[pid];
     if (p.defeated) return;
     p.defeated = true;
-    this.events.push({ type: 'defeated', player: pid });
+    p.defeatReason = reason;
+    // A fallen realm crumbles: everything it still owns is gone.
+    for (const e of this.entities) if (e.owner === pid && !e.dead) this.kill(e, null);
+    this.events.push({ type: 'defeated', player: pid, reason });
     this.checkTeams(reason);
   }
 }

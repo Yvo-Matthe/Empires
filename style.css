@@ -33,7 +33,10 @@ h2 { color: var(--gold); font-weight: normal; letter-spacing: 2px; }
 .empire-card .motto { margin-left: 54px; color: var(--muted); font-style: italic; }
 .empire-card p { color: var(--muted); }
 .empire-card ul { padding-left: 18px; margin: 8px 0; }
-.empire-card .unique { color: var(--gold); }
+.empire-card .unique, .empire-card .leader { color: var(--gold); }
+.empire-card ul.good li::marker { content: '+ '; color: var(--good); }
+.empire-card ul.bad li::marker { content: '− '; color: var(--bad); }
+#info .bonuses li.weak { color: #d99a8f; }
 .shield { position: absolute; left: 16px; top: 16px; width: 40px; height: 46px; background: var(--pc); clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%); }
 .shield::after { content: ''; position: absolute; left: 16px; top: 6px; width: 8px; height: 28px; background: var(--tc); box-shadow: -10px 8px 0 -0px transparent; }
 .tabs { display: flex; justify-content: center; gap: 4px; }

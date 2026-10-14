@@ -33,7 +33,9 @@ function buildMenu() {
     card.style.setProperty('--pc', emp.color);
     card.style.setProperty('--tc', emp.trim);
     card.innerHTML = `<div class="shield"></div><h3>${emp.name}</h3><div class="motto">“${emp.motto}”</div>
-      <p>${emp.description}</p><ul>${emp.bonuses.map((b) => `<li>${b}</li>`).join('')}</ul>
+      <p>${emp.description}</p><div class="leader">Leader: <b>👑 ${emp.leader}</b></div>
+      <ul class="good">${emp.bonuses.map((b) => `<li>${b}</li>`).join('')}</ul>
+      <ul class="bad">${emp.weaknesses.map((b) => `<li>${b}</li>`).join('')}</ul>
       <div class="unique">Unique unit: <b>${u.icon} ${u.name}</b></div>`;
     card.onclick = () => selectEmpire(key);
     cards.appendChild(card);
@@ -194,7 +196,7 @@ function launch(game, player, cmd, mode) {
   renderer.centerOn(tc.x, tc.y + 40);
   ui.select(game.entities.filter((e) => e.owner === player && e.entity === 'unit'));
   $('chat').classList.add('hidden');
-  if (mode === 'sp') ui.message(`Long live the ${game.players[player].empire.name}! Gather resources and destroy the enemy Town Center.`);
+  if (mode === 'sp') ui.message(`Long live the ${game.players[player].empire.name}! Keep ${game.players[player].empire.leader} alive and defeat the enemy leader.`);
 }
 
 function togglePause() {
@@ -222,7 +224,7 @@ function showEnd() {
   const won = over.team != null ? g.players[me].team === over.team : over.winner === me;
   $('end-title').textContent = won ? 'Victory!' : over.winner === -1 ? 'Game Over' : 'Defeat';
   $('end-title').className = won ? 'win' : 'lose';
-  $('end-reason').textContent = over.reason || (won ? 'The enemy Town Center has fallen. Your empire reigns supreme.' : 'Your strongholds have fallen.');
+  $('end-reason').textContent = over.reason || (won ? 'Your enemies are vanquished. Your empire reigns supreme.' : 'Your reign has ended.');
   const t = Math.floor(over.time || g.time);
   $('end-stats').innerHTML = `<tr><th></th>${g.players.map((p) => `<th style="color:${p.color}">${escapeHtml(p.name || p.empire.name)}</th>`).join('')}</tr>` +
     [['Units trained', 'trained'], ['Enemies killed', 'killed'], ['Units/buildings lost', 'lost'], ['Resources gathered', 'gathered'], ['Buildings built', 'built']]

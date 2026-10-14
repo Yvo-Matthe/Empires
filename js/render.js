@@ -527,12 +527,18 @@ class Renderer {
     c.translate(Math.round(u.x), Math.round(u.y));
     c.fillStyle = 'rgba(0,0,0,0.3)';
     c.beginPath(); c.ellipse(0, 7, cav ? 13 : 7, cav ? 4 : 3, 0, 0, Math.PI * 2); c.fill();
+    const leader = u.type === 'leader';
+    if (leader) {
+      // A golden ring marks the leader everyone must protect (or hunt).
+      c.strokeStyle = 'rgba(242,201,76,0.8)'; c.lineWidth = 1.5;
+      c.beginPath(); c.ellipse(0, 7, 16, 6, 0, 0, Math.PI * 2); c.stroke();
+    }
     c.scale(u.facing, 1);
 
     if (cav) {
       // Horse
       const leg = u.moving ? Math.sin(u.anim * 16) * 4 : 0;
-      const horse = u.type === 'paladin' ? '#ece6da' : '#6b4226';
+      const horse = u.type === 'paladin' ? '#ece6da' : leader ? '#2b2420' : '#6b4226';
       c.strokeStyle = shade(horse === '#6b4226' ? horse : '#a8a090', -0.1);
       c.lineWidth = 2.5;
       c.beginPath();
@@ -558,16 +564,40 @@ class Renderer {
 
     // Body / tabard
     const peasant = u.type === 'peasant';
-    c.fillStyle = peasant ? '#9c7b52' : (u.def.armor >= 2 ? '#9aa1a8' : '#7a6a55');
-    c.beginPath(); c.roundRect(-5, -11, 10, 12, 3); c.fill();
-    c.fillStyle = col;
-    if (peasant) c.fillRect(-5, -4, 10, 2.5);
-    else { c.beginPath(); c.roundRect(-3.5, -10, 7, 11, 2); c.fill(); c.fillStyle = trim; c.fillRect(-1, -8, 2, 6); }
+    if (leader) {
+      // Royal cape
+      c.fillStyle = col;
+      c.beginPath(); c.moveTo(-3, -12); c.lineTo(3, -12); c.lineTo(-2, 2); c.lineTo(-9, 1); c.closePath(); c.fill();
+    }
+    if (peasant && u.female) {
+      // Long dress over the legs
+      c.fillStyle = '#8a6a8f';
+      c.beginPath(); c.moveTo(-4, -11); c.lineTo(4, -11); c.lineTo(6, 5); c.lineTo(-6, 5); c.closePath(); c.fill();
+      c.fillStyle = col; c.fillRect(-4.5, -5, 9, 2);
+    } else {
+      c.fillStyle = peasant ? '#9c7b52' : leader ? '#c9ccd1' : (u.def.armor >= 2 ? '#9aa1a8' : '#7a6a55');
+      c.beginPath(); c.roundRect(-5, -11, 10, 12, 3); c.fill();
+      c.fillStyle = col;
+      if (peasant) c.fillRect(-5, -4, 10, 2.5);
+      else { c.beginPath(); c.roundRect(-3.5, -10, 7, 11, 2); c.fill(); c.fillStyle = trim; c.fillRect(-1, -8, 2, 6); }
+    }
 
     // Head
     c.fillStyle = SKIN;
     c.beginPath(); c.arc(0, -14, 3.6, 0, Math.PI * 2); c.fill();
-    if (peasant) {
+    if (leader) {
+      c.fillStyle = '#f2c94c';
+      c.beginPath();
+      c.moveTo(-4, -16); c.lineTo(-4, -21); c.lineTo(-2, -18.5); c.lineTo(0, -22); c.lineTo(2, -18.5); c.lineTo(4, -21); c.lineTo(4, -16);
+      c.closePath(); c.fill();
+      c.fillStyle = '#c0392b'; c.fillRect(-0.8, -18.5, 1.6, 1.6);
+    } else if (peasant && u.female) {
+      // Braided hair under a kerchief
+      c.fillStyle = '#6b3e1f';
+      c.fillRect(-5, -15, 2.2, 8);
+      c.fillStyle = '#efe4c8';
+      c.beginPath(); c.arc(0, -15.5, 4, Math.PI, 0); c.lineTo(4, -14); c.lineTo(-4, -14); c.fill();
+    } else if (peasant) {
       c.fillStyle = '#d8c070';
       c.beginPath(); c.ellipse(0, -16.5, 6, 1.8, 0, 0, Math.PI * 2); c.fill();
       c.fillRect(-3, -19, 6, 3);
@@ -620,10 +650,11 @@ class Renderer {
         break;
       case 'manatarms':
       case 'paladin':
+      case 'leader':
         c.rotate(-0.8 + swing * 1.8);
         c.strokeStyle = '#ddd'; c.lineWidth = 2;
         c.beginPath(); c.moveTo(0, 0); c.lineTo(0, -13); c.stroke();
-        c.strokeStyle = u.type === 'paladin' ? '#e6c25a' : '#6b4a2b';
+        c.strokeStyle = u.type === 'manatarms' ? '#6b4a2b' : '#e6c25a';
         c.beginPath(); c.moveTo(-3, -1); c.lineTo(3, -1); c.stroke();
         c.restore();
         c.fillStyle = col;

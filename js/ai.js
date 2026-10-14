@@ -39,18 +39,29 @@ class AIController {
     const mine = g.entities.filter((e) => e.owner === pid && !e.dead);
     const units = mine.filter((e) => e.entity === 'unit');
     const peasants = units.filter((u) => u.def.worker);
-    const army = units.filter((u) => !u.def.worker);
+    const army = units.filter((u) => !u.def.worker && u.type !== 'leader');
+    const leader = units.find((u) => u.type === 'leader');
     const blds = mine.filter((e) => e.entity === 'building');
     const home = this.home();
     if (!home) return;
     this.ctx = { p, peasants, army, blds, home };
 
+    this.guardLeader(leader, home);
     this.trainPeasants();
     this.ensureBuilders();
     this.planBuildings();
     this.assignIdle();
     this.trainArmy();
     this.useArmy();
+  }
+
+  // The AI keeps its leader safe behind its Town Center.
+  guardLeader(leader, home) {
+    if (!leader || leader.order) return;
+    const enemy = this.enemyStart();
+    const a = Math.atan2(enemy.y * TILE - home.y, enemy.x * TILE - home.x) + Math.PI;
+    const x = home.x + Math.cos(a) * 4 * TILE, y = home.y + Math.sin(a) * 4 * TILE;
+    if (dist(leader.x, leader.y, x, y) > 3 * TILE) this.g.cmdMove([leader], x, y);
   }
 
   count(type, completeOnly = false) {

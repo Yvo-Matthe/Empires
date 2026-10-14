@@ -92,3 +92,35 @@ test('forfeit ends the game only when one team is left', () => {
   g.forfeit(2, 'left');
   assert.strictEqual(g.over.team, 1);
 });
+
+test('each player starts with two men, two women and a leader', () => {
+  const g = new S.Game({ seed: 8, ai: [false, false] });
+  const mine = g.entities.filter((e) => e.owner === 0 && e.entity === 'unit');
+  assert.strictEqual(mine.filter((u) => u.type === 'peasant' && u.female).length, 2);
+  assert.strictEqual(mine.filter((u) => u.type === 'peasant' && !u.female).length, 2);
+  const leader = mine.find((u) => u.type === 'leader');
+  assert.strictEqual(leader.def.name, 'King Edric');
+  assert.strictEqual(g.unitDef(1, 'leader').name, 'Duchess Isolde');
+  g.cmdDelete(leader);
+  assert.ok(!leader.dead, 'leaders cannot be deleted');
+});
+
+test('when a leader dies, that player is out', () => {
+  const g = new S.Game({ seed: 8, ai: [false, false] });
+  const leader = g.entities.find((u) => u.owner === 1 && u.type === 'leader');
+  const knight = g.addUnit(0, 'knight', leader.x + 20, leader.y);
+  g.applyDamage(knight, leader, 10000);
+  g.step();
+  assert.ok(g.players[1].defeated);
+  assert.strictEqual(g.over.winner, 0);
+  assert.match(g.over.reason, /Duchess Isolde has fallen/);
+  assert.strictEqual(g.entities.filter((e) => e.owner === 1 && !e.dead).length, 0, 'the fallen realm crumbles');
+});
+
+test('empire weaknesses apply', () => {
+  const g = new S.Game({ seed: 3, empires: ['aldermark', 'valmont'] });
+  assert.strictEqual(g.unitDef(0, 'archer').cost.gold, Math.round(S.UNITS.archer.cost.gold * 1.25));
+  assert.strictEqual(g.unitDef(1, 'knight').cost.gold, Math.round(S.UNITS.knight.cost.gold * 1.25));
+  assert.ok(g.unitDef(0, 'manatarms').speed < S.UNITS.manatarms.speed);
+  assert.ok(g.gatherRate(1, 'farm') < g.gatherRate(0, 'farm'));
+});

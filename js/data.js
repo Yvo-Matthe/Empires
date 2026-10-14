@@ -19,9 +19,15 @@ const NODE_RES = { berries: 'food', farm: 'food', tree: 'wood', stone: 'stone', 
 // range is in tiles, measured edge to edge. speed in px/s. bonus is extra damage vs a tag.
 const UNITS = {
   peasant: {
-    name: 'Peasant', icon: '👨‍🌾', hp: 40, atk: 3, armor: 0, range: 0.4, cooldown: 1.5, speed: 56,
+    name: 'Villager', icon: '🧑‍🌾', hp: 40, atk: 3, armor: 0, range: 0.4, cooldown: 1.5, speed: 56,
     sight: 6, cost: { food: 50 }, time: 10, tags: ['civilian'], worker: true,
-    desc: 'Gathers resources and constructs buildings.',
+    desc: 'Men and women of your realm. They gather resources and construct buildings.',
+  },
+  // Every player has exactly one leader. It cannot be trained: if it dies, that player is out.
+  leader: {
+    name: 'Leader', icon: '👑', hp: 320, atk: 14, armor: 3, range: 0.4, cooldown: 1.6, speed: 72,
+    sight: 9, cost: {}, time: 0, tags: ['cavalry', 'leader'], bonus: { infantry: 3 }, regen: 1.5,
+    desc: 'You, in the field. Strong, and slowly heals out of combat, but if your leader falls, your reign ends.',
   },
   spearman: {
     name: 'Spearman', icon: '🔱', hp: 55, atk: 4, armor: 0, range: 0.5, cooldown: 1.8, speed: 54,
@@ -61,12 +67,12 @@ const BUILDINGS = {
     name: 'Town Center', icon: '🏛️', size: 4, hp: 2400, armor: 3, cost: { wood: 275, stone: 100 }, time: 80,
     pop: 10, sight: 8, trains: ['peasant'], dropoff: ['food', 'wood', 'stone', 'gold'],
     attack: { atk: 5, range: 6, cooldown: 2, arrows: 1 },
-    desc: 'Heart of your empire. Trains peasants and accepts every resource.',
+    desc: 'Heart of your empire. Trains villagers and accepts every resource.',
   },
   house: { name: 'House', icon: '🏠', size: 2, hp: 500, armor: 1, cost: { wood: 30 }, time: 15, pop: 5, sight: 3,
     desc: 'Supports 5 population.' },
   farm: { name: 'Farm', icon: '🌾', size: 3, hp: 300, armor: 0, cost: { wood: 60 }, time: 12, sight: 2, farm: true,
-    walkable: true, desc: 'An endless food source worked by one peasant.' },
+    walkable: true, desc: 'An endless food source worked by one villager.' },
   mill: { name: 'Mill', icon: '🌀', size: 2, hp: 600, armor: 1, cost: { wood: 100 }, time: 20, sight: 4,
     dropoff: ['food'], desc: 'Food drop-off point. Build it near berries and farms.' },
   lumbercamp: { name: 'Lumber Camp', icon: '🪓', size: 2, hp: 600, armor: 1, cost: { wood: 100 }, time: 20, sight: 4,
@@ -88,7 +94,7 @@ const BUILDINGS = {
   },
 };
 
-// Order of the peasant build menu (grid slots Q W E R / A S D F / Z X C V).
+// Order of the villager build menu (grid slots Q W E R / A S D F / Z X C V).
 const BUILD_MENU = ['house', 'farm', 'mill', 'lumbercamp', 'miningcamp', 'barracks', 'archeryrange', 'stable',
   'tower', 'castle', 'towncenter'];
 
@@ -100,15 +106,22 @@ const EMPIRES = {
     trim: '#f2c94c',
     unique: 'paladin',
     description: 'A proud highland kingdom of knightly orders and golden wheat fields.',
+    leader: 'King Edric',
     bonuses: [
       'Chivalric Orders: Knights and Royal Paladins have +20% HP',
       'Royal Granaries: farmers gather 15% faster',
       'Crown Masons: Castles are built 25% faster',
     ],
+    weaknesses: [
+      'Poor Bowyers: Archers cost 25% more',
+      'Heavy Plate: Spearmen and Men-at-Arms move 10% slower',
+    ],
     mods: {
       unitHp: { knight: 1.2, paladin: 1.2 },
       gather: { farm: 1.15 },
       buildTime: { castle: 0.75 },
+      unitCost: { archer: 1.25 },
+      unitSpeed: { spearman: 0.9, manatarms: 0.9 },
     },
   },
   valmont: {
@@ -118,15 +131,21 @@ const EMPIRES = {
     trim: '#ecf0f1',
     unique: 'longbowman',
     description: 'A wooded duchy famed for its bowmen and patient stonework.',
+    leader: 'Duchess Isolde',
     bonuses: [
       'Forest Wardens: lumberjacks gather 15% faster',
       'Patient Stone: Towers and Castles cost 20% less stone',
       'Yeomanry: archers have +1 range',
     ],
+    weaknesses: [
+      'Few Horses: Knights cost 25% more',
+      'Stony Soil: farmers gather 10% slower',
+    ],
     mods: {
-      gather: { tree: 1.15 },
+      gather: { tree: 1.15, farm: 0.9 },
       buildCost: { tower: { stone: 0.8 }, castle: { stone: 0.8 } },
       unitRange: { archer: 1 },
+      unitCost: { knight: 1.25 },
     },
   },
 };

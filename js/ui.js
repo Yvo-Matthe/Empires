@@ -42,7 +42,7 @@ class UI {
       this.message(`${BUILDINGS[ev.btype].name} completed.`);
     } else if (ev.type === 'defeated') {
       const p = this.game.players[ev.player];
-      if (ev.player !== this.player) this.message(`${p.name || p.empire.name} has been defeated!`, 'good');
+      if (ev.player !== this.player) this.message(`${ev.reason || (p.name || p.empire.name) + ' has been defeated'}!`, 'good');
     }
   }
 
@@ -249,6 +249,11 @@ class UI {
       return;
     }
     if (k === '.' || k === ',') { this.nextIdle(); return; }
+    if (k === 'l' || k === 'L') {
+      const ld = this.game.entities.find((u) => u.owner === this.player && u.type === 'leader');
+      if (ld) { this.select([ld]); this.r.centerOn(ld.x, ld.y); }
+      return;
+    }
     if (/^[0-9]$/.test(k)) {
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.groups[k] = this.selection.slice(); this.message(`Group ${k} set.`); return; }
       const grp = (this.groups[k] || []).filter((x) => !x.dead && this.game.byId.get(x.id) === x);
@@ -271,7 +276,7 @@ class UI {
 
   nextIdle() {
     const idle = this.game.entities.filter((u) => u.owner === this.player && u.entity === 'unit' && u.def.worker && !u.order);
-    if (!idle.length) { this.message('No idle peasants.'); return; }
+    if (!idle.length) { this.message('No idle villagers.'); return; }
     const u = idle[this.idleIndex++ % idle.length];
     this.select([u]);
     this.r.centerOn(u.x, u.y);
@@ -427,7 +432,7 @@ class UI {
     if (!sel.length) {
       const p = this.me;
       info.innerHTML = `<div class="title">${p.empire.name}</div><div class="motto">“${p.empire.motto}”</div>
-        <ul class="bonuses">${p.empire.bonuses.map((b) => `<li>${b}</li>`).join('')}</ul>`;
+        <ul class="bonuses">${p.empire.bonuses.map((b) => `<li>${b}</li>`).join('')}${p.empire.weaknesses.map((b) => `<li class="weak">${b}</li>`).join('')}</ul>`;
       return;
     }
     if (sel.length > 1) {
@@ -446,7 +451,8 @@ class UI {
     }
     const owner = g.players[e.owner];
     const hpPct = Math.round((e.hp / e.maxHp) * 100);
-    let html = `<div class="title">${e.def.icon} ${e.def.name}${e.owner !== this.player ? ` <span class="enemy" style="color:${owner.color}">(${owner.name || owner.empire.name})</span>` : ''}</div>
+    const title = e.def.worker ? `${e.def.name} (${e.female ? 'woman' : 'man'})` : e.def.name;
+    let html = `<div class="title">${e.def.icon} ${title}${e.owner !== this.player ? ` <span class="enemy" style="color:${owner.color}">(${owner.name || owner.empire.name})</span>` : ''}</div>
       <div class="hpbar"><i style="width:${hpPct}%"></i><span>${Math.ceil(e.hp)} / ${e.maxHp}</span></div>`;
     if (e.entity === 'unit') {
       html += `<div class="stats">⚔️ ${e.def.atk} &nbsp; 🛡️ ${e.def.armor}${e.def.range > 1 ? ` &nbsp; 🎯 ${e.def.range}` : ''} &nbsp; 👁️ ${e.def.sight}</div>`;

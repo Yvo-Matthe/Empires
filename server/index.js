@@ -260,7 +260,7 @@ function loadWorlds() {
   for (const f of files) {
     try {
       const data = JSON.parse(fs.readFileSync(path.join(WORLD_DIR, f), 'utf8'));
-      if (!data.s || data.s.version !== 2 || data.s.over) continue;
+      if (!data.s || data.s.version !== 3 || data.s.over) continue;
       const wr = makeWorldRoom(data.code, new S.World({ state: data.s, humans: [] }));
       wr.players = data.players.map((p) => ({ ...p, ws: null }));
       // Battles that were being fought when the server stopped are settled by the dice.
@@ -386,6 +386,8 @@ function worldCommand(ws, wr, m) {
     case 'halt': r = w.halt(c, int(m.army)); break;
     case 'recruit': r = w.recruit(c, int(m.prov), String(m.type)); break;
     case 'split': r = w.split(c, int(m.army)); break;
+    case 'general': r = w.appointGeneral(c, int(m.army)); break;
+    case 'governor': r = w.appointGovernor(c, int(m.prov)); break;
     case 'envoy': r = w.envoy(c, int(m.prov)); break;
     case 'decide': r = w.decide(c, int(m.battle), !!m.fight); break;
     default: return;

@@ -51,13 +51,19 @@ so a player can only command their own units.
 - **World Campaign:** rule a country on a real-time world map. The calendar runs (pause it or
   speed it up in single player); your provinces pay gold every month. Recruit troops, then
   right-click any province to march an army there along the roads. When armies meet you choose to
-  fight the battle in real time or auto-resolve it. Your leader commands your main army: if your
-  leader falls, your reign ends. Progress is saved in the browser.
+  fight the battle in real time or auto-resolve it. Your king starts in your capital with a royal
+  guard, behind the capital's walls. If your king falls, your reign ends; slay the enemy king and
+  you win. Progress is saved in the browser.
+- **City hall:** every province has one. Hire **generals** there (only an army led by a general
+  or the king can march; a split-off army needs its own general) and **governors** to manage a
+  province (+50% gold and 2 more recruits a month). Generals can fall in battle; governors flee
+  when their province is taken.
 - **World Council:** at the end of every game year the provinces vote for a World Leader. Your
   provinces vote for you (capitals have 3 votes, other provinces 1, 19 in all). The five free
   provinces in the middle vote for the country they favor most: send envoys with gifts to win
-  them over, or conquer them (which makes the other free lords trust you less). 10 votes elect
-  you World Leader and win the game. A year lasts 15 minutes, 1 hour or 4 hours of real time.
+  them over, or conquer them (which makes the other free lords trust you less). A two-thirds
+  majority, 13 votes, elects you World Leader and wins the game, so you also have to take land
+  from your rival. A year lasts 15 minutes, 1 hour or 4 hours of real time.
 - **Skirmish:** a full real-time game (economy, buildings, army) against the computer.
 - **Multiplayer:** the same with friends and AI players, up to 4 players in teams (see above).
 

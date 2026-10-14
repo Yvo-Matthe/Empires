@@ -23,6 +23,15 @@ const ENVOY_FAVOR = 12;
 const FAVOR_TO_VOTE = 25; // a free province votes for the country it favors most, once favor reaches this
 const CONQUEST_FAVOR_LOSS = 10; // conquering a free province makes the others wary
 const CAPITAL_VOTES = 3;
+// Characters hired at a province's city hall. Only armies led by a general (or the king) can march.
+const GENERAL_COST = 150;
+const GOVERNOR_COST = 120;
+const GOVERNOR_INCOME = 0.5; // +50% income
+const GOVERNOR_RECRUITS = 2; // extra recruits per month
+const GENERAL_POWER = 3;
+const CHARACTER_NAMES = ['Sir Aldric', 'Lady Maren', 'Sir Godfrey', 'Lady Elsbeth', 'Sir Roland', 'Lady Ysolde', 'Sir Baldwin',
+  'Lady Rowena', 'Sir Tristan', 'Lady Mathilde', 'Sir Percival', 'Lady Gwendolyn', 'Sir Osric', 'Lady Isabeau', 'Sir Edmund',
+  'Lady Adela', 'Sir Hugo', 'Lady Sibylla', 'Sir Reynard', 'Lady Cecily', 'Sir Walter', 'Lady Joan', 'Sir Geoffrey', 'Lady Agnes'];
 
 // Gold price to recruit one unit on the world map.
 const RECRUIT_COST = { spearman: 35, manatarms: 60, archer: 55, knight: 95, paladin: 125, longbowman: 75 };
@@ -55,14 +64,18 @@ const LINKS = [
   [11, 7], [12, 9], [12, 6],
   [10, 11], [10, 12], [10, 13], [10, 14], [11, 13], [12, 14],
 ];
+// Each country starts with a field army under a general, and the king with a guard in the capital.
 const STARTING_ARMY = { spearman: 6, manatarms: 4, archer: 4, knight: 2 };
+const ROYAL_GUARD = { spearman: 6, manatarms: 2, archer: 6 };
+const CAPITAL_WALLS = 1.8; // defenders of their own capital fight behind walls
 const TOTAL_VOTES = PROVINCES.reduce((n, p) => n + (p.capital ? CAPITAL_VOTES : 1), 0);
-const VOTES_TO_WIN = Math.floor(TOTAL_VOTES / 2) + 1;
+// A two-thirds majority: diplomacy alone is not enough, a country has to win land from its rival too.
+const VOTES_TO_WIN = Math.ceil((TOTAL_VOTES * 2) / 3);
 
-function armyPower(units, leader) {
-  let p = leader ? UNIT_POWER.leader : 0;
+function armyPower(units, leader, general) {
+  let p = (leader ? UNIT_POWER.leader : 0) + (general ? GENERAL_POWER : 0);
   for (const t in units) p += (UNIT_POWER[t] || 1) * units[t];
-  return p;
+  return general ? p * 1.1 : p;
 }
 function armySize(units) { return Object.values(units).reduce((a, b) => a + b, 0); }
 function yearLength(key) { return (YEAR_LENGTHS.find((y) => y.key === key) || YEAR_LENGTHS[0]).seconds; }
@@ -80,13 +93,18 @@ class World {
     if (state) { this.s = state; return; }
     if (!empires) empires = [empire, PLAYABLE_EMPIRES.find((k) => k !== empire) || empire];
     this.s = {
-      version: 2, seed, time: 0, yearLen, empires: [empires[0], empires[1], 'rebels'],
+      version: 3, seed, time: 0, yearLen, empires: [empires[0], empires[1], 'rebels'],
       gold: [400, 400],
-      provinces: PROVINCES.map((p, id) => ({ id, owner: p.owner, recruited: 0, favor: [0, 0], envoy: [-1, -1] })),
-      armies: [], battles: [], council: [], nextArmy: 1, nextBattle: 1, log: [], over: null, aiT: 0,
+      provinces: PROVINCES.map((p, id) => ({ id, owner: p.owner, recruited: 0, favor: [0, 0], envoy: [-1, -1], governor: null })),
+      armies: [], battles: [], council: [], nextArmy: 1, nextBattle: 1, nextName: seed % CHARACTER_NAMES.length,
+      log: [], over: null, aiT: 0,
     };
-    // Each country starts with its leader's army in its capital; the free lords garrison theirs.
-    for (const owner of COUNTRIES) this.addArmy(owner, this.capitalOf(owner), { ...STARTING_ARMY }, true);
+    // Each country starts with its king and a guard in the capital, and a field army under a general.
+    // The free lords garrison their provinces.
+    for (const owner of COUNTRIES) {
+      this.addArmy(owner, this.capitalOf(owner), { ...ROYAL_GUARD }, true);
+      this.addArmy(owner, this.capitalOf(owner), { ...STARTING_ARMY }, false).general = this.newName();
+    }
     PROVINCES.forEach((p, id) => { if (p.garrison) this.addArmy(REBELS, id, { ...p.garrison }, false); });
     this.log(`${this.empireOf(0).leader} and ${this.empireOf(1).leader} claim the realm. The World Council meets at the end of every year.`);
   }
@@ -120,12 +138,26 @@ class World {
   battleOf(armyId) { return this.s.battles.find((b) => b.attacker === armyId || b.defender === armyId); }
   // Armies standing in a province (not on the road).
   armiesAt(prov) { return this.s.armies.filter((a) => a.prov === prov && a.to === null); }
-  idleArmyAt(prov, owner) { return this.armiesAt(prov).find((a) => a.owner === owner && !this.battleOf(a.id)); }
-  income(owner) {
-    return this.s.provinces.reduce((s, p) => s + (p.owner === owner ? PROVINCES[p.id].income : 0), 0);
+  // A standing army to put recruits in: a general's army first, then troops without a leader, the king's guard last.
+  idleArmyAt(prov, owner) {
+    const here = this.armiesAt(prov).filter((a) => a.owner === owner && !this.battleOf(a.id));
+    return here.find((a) => a.general) || here.find((a) => !a.leader) || here[0];
   }
-  power(a) { return armyPower(a.units, a.leader); }
-  recruitLimit(prov) { return PROVINCES[prov].capital ? 8 : 4; }
+  newName() { return CHARACTER_NAMES[this.s.nextName++ % CHARACTER_NAMES.length]; }
+  provinceIncome(id) {
+    const p = this.s.provinces[id];
+    return Math.round(PROVINCES[id].income * (p.governor ? 1 + GOVERNOR_INCOME : 1));
+  }
+  income(owner) {
+    return this.s.provinces.reduce((s, p) => s + (p.owner === owner ? this.provinceIncome(p.id) : 0), 0);
+  }
+  power(a) { return armyPower(a.units, a.leader, a.general); }
+  canMarch(a) { return a.leader || !!a.general; }
+  armyName(a) {
+    const e = this.empireOf(a.owner);
+    return a.leader ? `${e.leader}'s army` : a.general ? `${a.general}'s army` : `${e.name} troops`;
+  }
+  recruitLimit(prov) { return (PROVINCES[prov].capital ? 8 : 4) + (this.s.provinces[prov].governor ? GOVERNOR_RECRUITS : 0); }
   recruitable(owner) {
     const unique = this.empireOf(owner).unique;
     return ['spearman', 'manatarms', 'archer', 'knight', unique].map((t) => ({ type: t, cost: this.recruitCost(owner, t) }));
@@ -165,7 +197,7 @@ class World {
   }
 
   addArmy(owner, prov, units, leader) {
-    const a = { id: this.s.nextArmy++, owner, prov, units, leader: !!leader, to: null, prog: 0, path: [] };
+    const a = { id: this.s.nextArmy++, owner, prov, units, leader: !!leader, general: null, to: null, prog: 0, path: [] };
     this.s.armies.push(a);
     return a;
   }
@@ -193,7 +225,36 @@ class World {
     return { army: a };
   }
 
-  // Split off half of every troop type (never the leader) into a new army in the same province.
+  /** Hire a general at the city hall to lead an army standing in one of your provinces. */
+  appointGeneral(owner, armyId) {
+    const a = this.army(armyId);
+    if (this.s.over) return { error: 'The war is over' };
+    if (!a || a.owner !== owner) return { error: 'That is not your army' };
+    if (a.leader || a.general) return { error: 'That army already has a commander' };
+    if (a.to !== null || this.battleOf(a.id) || this.s.provinces[a.prov].owner !== owner) return { error: 'Generals are hired at the city hall of your own provinces' };
+    if (this.s.gold[owner] < GENERAL_COST) return { error: 'Not enough gold' };
+    this.s.gold[owner] -= GENERAL_COST;
+    a.general = this.newName();
+    this.log(`${a.general} takes command of an army of the ${this.empireOf(owner).name} in ${PROVINCES[a.prov].name}.`);
+    return { ok: true, general: a.general };
+  }
+
+  /** Hire a governor to manage a province: more gold and more recruits there. */
+  appointGovernor(owner, prov) {
+    const p = this.s.provinces[prov];
+    if (this.s.over) return { error: 'The war is over' };
+    if (!p || p.owner !== owner) return { error: 'Governors only manage your own provinces' };
+    if (PROVINCES[prov].capital && this.capitalOf(owner) === prov) return { error: 'The king rules the capital' };
+    if (p.governor) return { error: `${p.governor} already governs ${PROVINCES[prov].name}` };
+    if (this.s.gold[owner] < GOVERNOR_COST) return { error: 'Not enough gold' };
+    this.s.gold[owner] -= GOVERNOR_COST;
+    p.governor = this.newName();
+    this.log(`${p.governor} becomes governor of ${PROVINCES[prov].name}.`);
+    return { ok: true, governor: p.governor };
+  }
+
+  // Split off half of every troop type (never the king or the general) into a new army in the same
+  // province. The new army needs its own general before it can march.
   split(owner, armyId) {
     const a = this.army(armyId);
     if (!a || a.owner !== owner || a.to !== null || this.battleOf(a.id)) return { error: 'That army cannot split now' };
@@ -233,6 +294,7 @@ class World {
     if (!a || a.owner !== owner) return { error: 'That is not your army' };
     if (!PROVINCES[dest]) return { error: 'No such province' };
     if (this.battleOf(a.id)) return { error: 'That army is in battle' };
+    if (!this.canMarch(a)) return { error: 'Troops cannot march without a general. Hire one at the city hall' };
     if (a.to === null) {
       const path = this.route(a.prov, dest);
       if (!path || !path.length) return { error: 'Already there' };
@@ -319,12 +381,14 @@ class World {
     if (this.armiesAt(prov).some((o) => o.owner !== a.owner)) { a.path = []; return; }
     this.capture(a.owner, prov);
     if (a.path.length) { a.to = a.path.shift(); return; }
-    // Journey's end: join a friendly army waiting here.
-    const other = this.armiesAt(prov).find((b) => b !== a && b.owner === a.owner && !this.battleOf(b.id) && !b.path.length);
+    // Journey's end: join a friendly army waiting here, unless both have a commander.
+    const other = this.armiesAt(prov).find((b) => b !== a && b.owner === a.owner && !this.battleOf(b.id) && !b.path.length &&
+      !((b.leader || b.general) && (a.leader || a.general)));
     if (other) {
       for (const t in a.units) other.units[t] = (other.units[t] || 0) + a.units[t];
       other.leader = other.leader || a.leader;
-      a.units = {}; a.leader = false;
+      other.general = other.general || a.general;
+      a.units = {}; a.leader = false; a.general = null;
       this.removeEmpty();
     }
   }
@@ -334,6 +398,8 @@ class World {
     if (p.owner === owner) return;
     const prev = p.owner;
     p.owner = owner;
+    if (p.governor) this.log(`${p.governor}, governor of ${PROVINCES[prov].name}, flees.`);
+    p.governor = null;
     p.recruited = this.recruitLimit(prov); // no recruits from freshly taken land this month
     this.log(`${this.empireOf(owner).name} takes ${PROVINCES[prov].name}${prev === REBELS ? ' from the free lords' : ''}.`);
     if (prev === REBELS) {
@@ -378,7 +444,7 @@ class World {
     if (m % 12 === 0) { this.council(START_YEAR + m / 12 - 1); if (s.over) return; }
     for (const owner of COUNTRIES) s.gold[owner] += this.income(owner);
     for (const p of s.provinces) p.recruited = 0;
-    for (const owner of COUNTRIES) if (!this.humans.has(owner)) { this.aiEnvoys(owner); this.aiRecruit(owner); }
+    for (const owner of COUNTRIES) if (!this.humans.has(owner)) { this.aiEnvoys(owner); this.aiAppoint(owner); this.aiRecruit(owner); }
   }
 
   /** The World Council: every province casts its votes; a majority elects the World Leader. */
@@ -396,10 +462,14 @@ class World {
   }
 
   // ---------- battles ----------
+  defenseBonus(prov, owner) {
+    return PROVINCES[prov].capital && this.s.provinces[prov].owner === owner ? CAPITAL_WALLS : 1.1;
+  }
+
   // Odds for the attacker winning an auto-resolved battle.
   odds(battle) {
     const a = this.army(battle.attacker), d = this.army(battle.defender);
-    const pa = this.power(a), pd = this.power(d) * 1.1; // defenders hold the ground
+    const pa = this.power(a), pd = this.power(d) * this.defenseBonus(battle.prov, d.owner); // defenders hold the ground
     const r = pa / (pa + pd);
     return (r * r) / (r * r + (1 - r) * (1 - r));
   }
@@ -416,8 +486,9 @@ class World {
       for (let i = 0; i < win.units[t]; i++) if (rng() >= share) n++;
       if (n) units[t] = n;
     }
-    const winner = { units, leader: win.leader && rng() >= share * 0.3 };
+    const winner = { units, leader: win.leader && rng() >= share * 0.3, general: !!win.general && rng() >= share * 0.3 };
     if (win.leader && !winner.leader && !armySize(units)) winner.leader = true; // someone has to hold the field
+    if (win.general && !winner.general && !winner.leader && !armySize(units)) winner.general = true;
     const loser = { units: {}, leader: false };
     return this.applyBattle(battle, attackerWon ? [winner, loser] : [loser, winner], attackerWon);
   }
@@ -431,6 +502,9 @@ class World {
       if (army.leader && !survivors[i].leader) fallen.push(army.owner);
       army.units = { ...survivors[i].units };
       army.leader = survivors[i].leader;
+      // A general falls with the army, or in a hard fight (survivors say so when known).
+      const lives = survivors[i].general !== undefined ? survivors[i].general : armySize(army.units) > 0 || army.leader;
+      if (army.general && !lives) { this.log(`${army.general} falls at ${name}.`); army.general = null; }
     });
     const winner = attackerWon ? a : d;
     this.s.battles = this.s.battles.filter((b) => b !== battle && b.id !== battle.id);
@@ -442,7 +516,7 @@ class World {
       this.s.over = { winner: 1 - owner, reason: `${this.empireOf(owner).leader} has fallen at the Battle of ${name}.` };
     }
     // The loser is destroyed; a winning attacker takes the province.
-    if (attackerWon) { d.units = {}; d.leader = false; } else { a.units = {}; a.leader = false; }
+    if (attackerWon) { d.units = {}; d.leader = false; d.general = null; } else { a.units = {}; a.leader = false; a.general = null; }
     this.removeEmpty();
     if (attackerWon && this.army(a.id) && !this.s.over) this.capture(a.owner, battle.prov);
     this.checkOver();
@@ -515,21 +589,34 @@ class World {
     }
   }
 
+  // Generals for armies big enough to march, governors for the richest provinces.
+  aiAppoint(owner) {
+    for (const a of this.s.armies) {
+      if (a.owner !== owner || a.leader || a.general || armySize(a.units) < 6) continue;
+      if (this.s.gold[owner] < GENERAL_COST + 100) return;
+      this.appointGeneral(owner, a.id);
+    }
+    const ungoverned = this.s.provinces.filter((p) => p.owner === owner && !p.governor && p.id !== this.capitalOf(owner))
+      .sort((x, y) => PROVINCES[y.id].income - PROVINCES[x.id].income);
+    if (ungoverned.length && this.s.gold[owner] >= GOVERNOR_COST + 250) this.appointGovernor(owner, ungoverned[0].id);
+  }
+
   aiThink(owner) {
     const cap = this.capitalOf(owner);
     for (const a of this.s.armies) {
       if (a.owner !== owner || a.to !== null || this.battleOf(a.id)) continue;
-      // The leader's army only leaves the capital when it is overwhelming.
-      if (a.leader && this.power(a) < 30) {
+      // The king stays home in the capital unless his army is overwhelming.
+      if (a.leader && this.power(a) < 40) {
         if (a.prov !== cap && this.s.provinces[cap].owner === owner) this.move(owner, a.id, cap);
         continue;
       }
+      if (!this.canMarch(a)) continue;
       const targets = this.adj[a.prov]
         .filter((n) => this.s.provinces[n].owner !== owner)
         // Free provinces that already back us at the Council are left in peace.
         .filter((n) => { const p = this.s.provinces[n]; return !(p.owner === REBELS && p.favor[owner] >= FAVOR_TO_VOTE && p.favor[owner] > p.favor[1 - owner]); })
         .map((n) => {
-          const d = this.armiesAt(n).filter((x) => x.owner !== owner).reduce((t, x) => t + this.power(x), 0);
+          const d = this.armiesAt(n).filter((x) => x.owner !== owner).reduce((t, x) => t + this.power(x), 0) * this.defenseBonus(n, this.s.provinces[n].owner);
           return { n, def: d, value: PROVINCES[n].income + (PROVINCES[n].capital ? 200 : 0) };
         })
         .filter((t) => this.power(a) > t.def * 1.3)

@@ -11,7 +11,7 @@ function loadCampaignSave() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     const st = raw ? JSON.parse(raw) : null;
-    return st && st.version === 2 && !st.over ? st : null;
+    return st && st.version === 3 && !st.over ? st : null;
   } catch { return null; }
 }
 
@@ -193,6 +193,7 @@ class CampaignUI {
     c.textAlign = 'center';
     c.fillText(String(armySize(a.units)), x, y + 16 * k);
     if (a.leader) { c.font = '12px serif'; c.fillText('👑', x, y - 2); }
+    else if (a.general) { c.font = '11px serif'; c.fillText('⭐', x, y - 2); }
     this.hits.push({ a, x, y, k });
   }
 
@@ -370,6 +371,8 @@ class CampaignUI {
       case 'halt': r = w.halt(me, args.army); break;
       case 'recruit': r = w.recruit(me, args.prov, args.type); if (r.army) this.selArmy = r.army.id; break;
       case 'split': r = w.split(me, args.army); if (r.army) this.selArmy = r.army.id; break;
+      case 'general': r = w.appointGeneral(me, args.army); break;
+      case 'governor': r = w.appointGovernor(me, args.prov); break;
       case 'envoy': r = w.envoy(me, args.prov); if (r.ok) this.toast(`Your envoy brings gifts to ${PROVINCES[args.prov].name}.`); break;
       case 'decide': r = w.decide(me, args.battle, args.fight); break;
     }
@@ -385,6 +388,7 @@ class CampaignUI {
     const side = (army) => {
       const e = w.empireOf(army.owner);
       const units = Object.entries(army.units).filter(([, n]) => n > 0).map(([t, n]) => `${UNITS[t].icon} ${n} ${UNITS[t].name}`);
+      if (army.general) units.unshift(`⭐ General ${army.general}`);
       if (army.leader) units.unshift(`👑 ${e.leader}`);
       return `<div class="side" style="--pc:${e.color}"><h3>${e.name}</h3><ul>${units.map((u) => `<li>${u}</li>`).join('')}</ul></div>`;
     };
@@ -519,7 +523,7 @@ class CampaignUI {
       const p = w.province(this.selProv);
       const owner = w.empireOf(p.owner);
       const vote = v.byProv[p.id];
-      html += `<h2>${p.name}${p.capital ? ' 🏰' : ''}</h2><div class="muted">Held by <b style="color:${owner.color}">${owner.name}</b> · 🪙 ${p.income} per month ·
+      html += `<h2>${p.name}${p.capital ? ' 🏰' : ''}</h2><div class="muted">Held by <b style="color:${owner.color}">${owner.name}</b> · 🪙 ${w.provinceIncome(p.id)} per month ·
         🗳️ ${p.capital ? CAPITAL_VOTES : 1} vote${p.capital ? 's' : ''} for ${vote === null ? 'nobody yet' : `<b style="color:${this.ownerColor(vote)}">${w.empireOf(vote).name}</b>`}</div>`;
       if (p.owner === REBELS) {
         html += `<h3>Favor of the free lords</h3>${COUNTRIES.map((o) => `<div class="favor"><span style="color:${this.ownerColor(o)}">${w.empireOf(o).name}</span>
@@ -528,6 +532,11 @@ class CampaignUI {
           <div class="muted">One envoy per month. Conquering free provinces makes the others trust you less.</div>`;
       }
       if (p.owner === this.me && !s.over) {
+        const isCap = w.capitalOf(this.me) === p.id;
+        html += `<h3>City hall</h3><div class="muted">${isCap ? `👑 ${me.leader} rules from here.`
+          : p.governor ? `🏛️ Governor: <b>${p.governor}</b> (+${GOVERNOR_INCOME * 100}% gold, +${GOVERNOR_RECRUITS} recruits a month)`
+          : 'No governor. A governor brings in more gold and more recruits.'}</div>
+          ${!isCap && !p.governor ? `<button class="governor" ${s.gold[this.me] < GOVERNOR_COST ? 'disabled' : ''}>🏛️ Appoint a governor (🪙 ${GOVERNOR_COST})</button>` : ''}`;
         const left = w.recruitLimit(p.id) - p.recruited;
         html += `<h3>Recruit <small>(${left} left this month)</small></h3><div class="recruit">${w.recruitable(this.me).map((r) =>
           `<button data-type="${r.type}" ${left <= 0 || s.gold[this.me] < r.cost ? 'disabled' : ''} title="${UNITS[r.type].desc}">${UNITS[r.type].icon} ${UNITS[r.type].name}<small>🪙 ${r.cost}</small></button>`).join('')}</div>`;
@@ -541,17 +550,20 @@ class CampaignUI {
       const list = Object.entries(a.units).filter(([, n]) => n > 0).map(([t, n]) => `<li>${UNITS[t].icon} ${n} × ${UNITS[t].name}</li>`).join('');
       const mine = a.owner === this.me, busy = !!w.battleOf(a.id);
       html += `<div class="army ${a.id === this.selArmy ? 'sel' : ''}" data-id="${a.id}" style="--pc:${e.color}">
-        <div><b>${a.leader ? `👑 ${e.leader}'s army` : `${e.name} army`}</b> <span class="muted">strength ${Math.round(w.power(a))}</span></div>
+        <div><b>${a.leader ? '👑 ' : a.general ? '⭐ ' : ''}${w.armyName(a)}</b> <span class="muted">strength ${Math.round(w.power(a))}</span></div>
         <div class="muted">${this.armyStatus(a)}</div>
         <ul>${list || '<li class="muted">No other troops</li>'}</ul>
-        ${mine && !busy ? '<div class="muted">Right-click any province on the map to march there.</div>' : ''}
+        ${mine && !busy && w.canMarch(a) ? '<div class="muted">Right-click any province on the map to march there.</div>' : ''}
+        ${mine && !busy && !w.canMarch(a) ? `<div class="muted">Troops without a general cannot march.</div>${a.to === null && s.provinces[a.prov].owner === this.me
+          ? `<button class="general" ${s.gold[this.me] < GENERAL_COST ? 'disabled' : ''}>⭐ Hire a general (🪙 ${GENERAL_COST})</button>` : ''}` : ''}
         ${mine && !busy && a.to === null && armySize(a.units) > 1 ? '<button class="split">Split army</button>' : ''}
         ${mine && !busy && a.to !== null ? '<button class="halt">Halt at the next province</button>' : ''}</div>`;
     }
     if (this.selProv === null && !sel) {
       html += `<h2>${me.name}</h2><p class="muted">“${me.motto}”</p>
         <p>Click a province or an army banner to select it, then <b>right-click</b> any province to march there.
-        Your provinces pay gold every month.</p>`;
+        Your provinces pay gold every month. Only armies led by a general or by ${me.leader} can march: hire generals,
+        and governors to manage your provinces, at the city hall of each province.</p>`;
       if (this.mp) {
         html += `<h3>Rulers</h3>${COUNTRIES.map((o) => {
           const names = this.players.filter((p) => p.country === o)
@@ -559,12 +571,14 @@ class CampaignUI {
           return `<div><b style="color:${this.ownerColor(o)}">${w.empireOf(o).name}</b>${o === this.me ? ' (you)' : ''}: ${names.length ? names.join(', ') : '🤖 computer'}</div>`;
         }).join('')}<div class="muted">A country with nobody online is ruled by the computer until its players return.</div>`;
       }
-      html += '<p class="warn">If your leader falls in battle, your reign ends.</p>';
+      html += `<p class="warn">${me.leader} starts in your capital. If your king falls, your reign ends; slay the enemy king to win.</p>`;
     }
     html += this.councilHtml();
     $('cmp-info').innerHTML = html;
     const info = $('cmp-info');
     info.querySelectorAll('.recruit button').forEach((b) => { b.onclick = () => this.act('recruit', { prov: this.selProv, type: b.dataset.type }); });
+    const gov = info.querySelector('.governor');
+    if (gov) gov.onclick = () => this.act('governor', { prov: this.selProv });
     const env = info.querySelector('.envoy');
     if (env) env.onclick = () => this.act('envoy', { prov: this.selProv });
     info.querySelectorAll('.army').forEach((el) => {
@@ -572,6 +586,7 @@ class CampaignUI {
         const id = +el.dataset.id;
         if (e.target.classList.contains('split')) { this.act('split', { army: id }); return; }
         if (e.target.classList.contains('halt')) { this.act('halt', { army: id }); return; }
+        if (e.target.classList.contains('general')) { this.act('general', { army: id }); return; }
         this.selArmy = id; this.refresh();
       };
     });

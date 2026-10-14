@@ -126,9 +126,9 @@ test('a multiplayer world: co-op rulers, a rival, real-time battles and rejoinin
 
   // Co-op rulers share the treasury and the armies; the rival cannot command them.
   a.send({ t: 'wcmd', c: 'recruit', prov: 0, type: 'spearman' });
-  await b.next('world', (m) => m.s.armies.some((x) => x.owner === 0 && x.leader && x.units.spearman === 7));
+  await b.next('world', (m) => m.s.armies.some((x) => x.owner === 0 && x.general && x.units.spearman === 7));
   let w = (await a.next('world'));
-  const lead = w.s.armies.find((x) => x.owner === 0 && x.leader);
+  const lead = w.s.armies.find((x) => x.owner === 0 && x.general);
   c.send({ t: 'wcmd', c: 'move', army: lead.id, to: 5 });
   assert.match((await c.next('notice')).text, /not your army/);
   b.send({ t: 'wcmd', c: 'move', army: lead.id, to: 5 });
@@ -148,7 +148,7 @@ test('a multiplayer world: co-op rulers, a rival, real-time battles and rejoinin
   a.send({ t: 'leaveBattle' });
   b.send({ t: 'leaveBattle' });
   w = await c.next('world', (m) => m.s.battles.length === 0 && m.s.provinces[5].owner === 0, 60000);
-  assert.ok(w.s.armies.find((x) => x.id === lead.id).leader, 'the leader survived');
+  assert.ok(w.s.armies.find((x) => x.id === lead.id).general, 'the general survived');
 
   // Cleo drops out and comes back to the same country.
   c.ws.close();

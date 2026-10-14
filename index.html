@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Empires: Age of Crowns</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Main menu -->
+  <div id="menu" class="overlay menu">
+    <div class="menu-inner">
+      <h1>EMPIRES</h1>
+      <div class="subtitle">Age of Crowns</div>
+      <h2>Choose your empire</h2>
+      <div id="empire-cards" class="cards"></div>
+      <div class="tabs">
+        <button class="tab active" data-tab="sp">Single Player</button>
+        <button class="tab" data-tab="mp">Multiplayer</button>
+      </div>
+      <div id="sp-panel" class="panel">
+        <label>Opponent difficulty
+          <select id="difficulty">
+            <option value="easy">Easy</option>
+            <option value="normal" selected>Normal</option>
+            <option value="hard">Hard</option>
+          </select>
+        </label>
+        <button id="start-sp" class="primary">Start Battle</button>
+      </div>
+      <div id="mp-panel" class="panel hidden">
+        <div id="mp-offline" class="hidden notice">
+          Multiplayer needs the game server. Run <code>npm install</code> and <code>npm start</code>,
+          then open <code>http://localhost:8080</code>. Friends join from <code>http://&lt;your-ip&gt;:8080</code>.
+        </div>
+        <div id="mp-form">
+          <label>Your name <input id="mp-name" maxlength="16" placeholder="Lord"></label>
+          <button id="mp-create" class="primary">Create Room</button>
+          <span class="or">or</span>
+          <input id="mp-code" maxlength="4" placeholder="CODE" class="code-input">
+          <button id="mp-join">Join Room</button>
+        </div>
+        <div id="mp-lobby" class="hidden">
+          <div>Room code: <b id="mp-room-code" class="room-code"></b> <span class="hint">Share this code with your opponent.</span></div>
+          <ul id="mp-players"></ul>
+          <button id="mp-start" class="primary">Start Battle</button>
+          <span id="mp-wait" class="hint">Waiting for the host to start…</span>
+          <button id="mp-leave">Leave Room</button>
+        </div>
+        <div id="mp-status" class="status"></div>
+      </div>
+      <div class="help">
+        <b>Controls:</b> left-click / drag to select · right-click to move, gather, build or attack ·
+        arrow keys or screen edges to scroll · mouse wheel to zoom · <b>H</b> Town Center · <b>.</b> idle peasant ·
+        <b>Ctrl+1-9</b> set group · <b>1-9</b> select group · <b>Q W E R / A S D F / Z X C V</b> command buttons ·
+        <b>Shift</b> queue placements · <b>Del</b> delete · <b>P</b> pause
+      </div>
+    </div>
+  </div>
+
+  <!-- Game -->
+  <div id="app" class="hidden">
+    <div id="topbar"></div>
+    <canvas id="view"></canvas>
+    <div id="bottom">
+      <div id="minimap-wrap"><canvas id="minimap" width="176" height="176"></canvas></div>
+      <div id="info"></div>
+      <div id="commands"></div>
+    </div>
+    <div id="messages"></div>
+    <div id="tooltip" class="hidden"></div>
+    <div id="chat" class="hidden"><input id="chat-input" maxlength="200" placeholder="Say something… (Enter to send)"></div>
+  </div>
+
+  <div id="pause" class="overlay hidden">
+    <div class="dialog">
+      <h2 id="pause-title">Paused</h2>
+      <button id="resume" class="primary">Resume</button>
+      <button id="quit">Quit to Main Menu</button>
+    </div>
+  </div>
+
+  <div id="end" class="overlay hidden">
+    <div class="dialog">
+      <h2 id="end-title"></h2>
+      <p id="end-reason"></p>
+      <table id="end-stats"></table>
+      <button id="end-menu" class="primary">Main Menu</button>
+    </div>
+  </div>
+
+  <script src="js/util.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/pathfinding.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

@@ -52,11 +52,18 @@ function buildMenu() {
     };
   });
   $('start-sp').onclick = startSinglePlayer;
-  $('cmp-new').onclick = () => openCampaign(new Campaign({ empire: App.empire, seed: Math.floor(Math.random() * 1e6) }));
-  $('cmp-continue').onclick = () => { const st = loadCampaignSave(); if (st) openCampaign(new Campaign({ state: st })); };
-  $('cmp-over-menu').onclick = () => { $('cmp-over').classList.add('hidden'); App.campaignUI = null; showScreen('menu'); };
+  for (const id of ['cmp-year', 'mp-year']) {
+    $(id).innerHTML = YEAR_LENGTHS.map((y) => `<option value="${y.key}">${y.name}</option>`).join('');
+  }
+  $('mp-year').value = 'long'; // multiplayer worlds run for hours: one Council vote every 4 hours
+  $('cmp-new').onclick = () => openCampaign(new World({
+    empire: App.empire, seed: Math.floor(Math.random() * 1e6), yearLen: yearLength($('cmp-year').value), humans: [0],
+  }), {});
+  $('cmp-continue').onclick = () => { const st = loadCampaignSave(); if (st) openCampaign(new World({ state: st, humans: [0] }), {}); };
+  $('cmp-over-menu').onclick = () => { $('cmp-over').classList.add('hidden'); leaveCampaign(); };
   refreshContinue();
   $('mp-create').onclick = () => mpConnect({ t: 'create' });
+  $('mp-create-world').onclick = () => mpConnect({ t: 'createWorld', year: $('mp-year').value });
   $('mp-join').onclick = () => mpConnect({ t: 'join', code: $('mp-code').value });
   $('mp-start').onclick = () => App.net && App.net.send({ t: 'start' });
   $('mp-add-ai').onclick = () => App.net && App.net.send({ t: 'addAi' });
@@ -72,34 +79,52 @@ function buildMenu() {
 function refreshContinue() {
   const st = loadCampaignSave();
   $('cmp-continue').disabled = !st;
-  $('cmp-continue').textContent = st ? `Continue Campaign (${EMPIRES[st.empires[0]].name}, turn ${st.turn})` : 'Continue Campaign';
+  $('cmp-continue').textContent = st ? `Continue Campaign (${EMPIRES[st.empires[0]].name}, ${new World({ state: st }).dateText()})` : 'Continue Campaign';
 }
 
 // ---------- world campaign ----------
-function openCampaign(campaign) {
+// Single player: the world runs in the browser. Multiplayer (opts.net): the server runs it.
+function openCampaign(world, { me = 0, net = null } = {}) {
   showScreen('campaign');
-  App.campaignUI = new CampaignUI(campaign, {
-    onBattle: (setup, name) => {
-      const game = new Game({ ...setup, difficulty: 'normal' });
-      game.battleName = name;
+  $('cmp-over').classList.add('hidden');
+  App.campaignUI = new CampaignUI(world, {
+    me, net,
+    onBattle: (setup) => {
+      const game = new Game({ seed: setup.seed, empires: setup.empires, ai: [false, true], battle: setup.battle, difficulty: 'normal' });
+      game.battleName = setup.name;
       launch(game, 0, localCommands(game, 0), 'sp');
       App.session.campaign = true;
     },
-    onQuit: () => { App.campaignUI = null; refreshContinue(); showScreen('menu'); },
+    onQuit: () => leaveCampaign(),
   });
   App.campaignUI.resize();
   App.campaignUI.refresh();
-  // A battle the AI started before the game was closed is replayed from the saved queue.
-  if (campaign.s.aiQueue) { const b = campaign.continueAi(); if (b) App.campaignUI.askBattle(b, true); App.campaignUI.afterAction(); }
 }
 
+function leaveCampaign() {
+  const ui = App.campaignUI;
+  App.campaignUI = null;
+  if (ui && ui.mp) mpDisconnect();
+  showScreen('menu');
+}
+
+// Back from a real-time battle to the world map.
 function returnToCampaign(retreat) {
   const s = App.session;
   if (s) s.ui.unbind();
   App.session = null;
   showScreen('campaign');
-  App.campaignUI.resize();
-  App.campaignUI.battleOver(retreat ? null : s.game.survivors(), !retreat && s.game.over && s.game.over.winner === 0, retreat);
+  const ui = App.campaignUI;
+  ui.resize();
+  if (s.worldBattle) {
+    // Multiplayer: the server applies the result. Leaving early hands the troops to the computer.
+    if (!s.game.over && App.net) App.net.send({ t: 'leaveBattle' });
+    ui.bindNet();
+    ui.refresh();
+    return;
+  }
+  const over = s.game.over;
+  ui.battleOver(retreat ? null : s.game.survivors(), over ? over.winner : -1, retreat);
 }
 
 function selectEmpire(key) {
@@ -138,9 +163,22 @@ async function mpConnect(first) {
     App.net.on('lobby', (m) => { App.lobby = m; renderLobby(); });
     App.net.on('you', (m) => { App.slot = m.slot; App.host = m.host; renderLobby(); });
     App.net.on('start', (m) => mpStart(m));
+    App.net.on('wyou', (m) => { App.worldMe = m.country; App.worldCode = m.code; });
+    App.net.on('world', (m) => {
+      const ui = App.campaignUI;
+      if (!ui || !ui.mp) {
+        openCampaign(new World({ state: m.s, humans: [] }), { me: App.worldMe, net: App.net });
+        App.campaignUI.setState(m);
+        App.campaignUI.toast(`World ${m.code}: share this code so friends can join. Rejoin later with the same code and name.`);
+      } else ui.setState(m);
+    });
     App.net.on('close', () => {
       App.net = null;
       App.lobby = null;
+      if (App.campaignUI && App.campaignUI.mp) {
+        App.campaignUI = null;
+        if (!App.session) showScreen('menu');
+      }
       if (App.session && App.session.mode === 'mp' && !App.session.game.over) {
         App.session.ui.message('Disconnected from the server.', 'warn');
         App.session.game.over = { winner: -1, reason: 'Disconnected from the server' };
@@ -208,17 +246,21 @@ function renderLobby() {
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`); }
 
 function mpStart(m) {
-  const game = new Game({ seed: m.seed, empires: m.empires, ai: m.ai, teams: m.teams, difficulty: m.difficulty, viewer: m.you });
+  const game = new Game({ seed: m.seed, empires: m.empires, ai: m.ai, teams: m.teams, difficulty: m.difficulty, viewer: m.you, battle: m.battle });
   game.ais = game.players.map(() => null); // the server plays the AI players
+  game.battleName = m.battleName;
+  $('cmp-battle').classList.add('hidden');
   game.players.forEach((p, i) => { p.name = m.names[i]; });
   const net = App.net;
   launch(game, m.you, netCommands(net, game, m.you), 'mp');
+  App.session.worldBattle = !!m.world;
   const ui = App.session.ui;
   net.on('snap', (s) => { for (const ev of applySnapshot(game, s)) ui.handleEvent(ev); });
   net.on('notice', (n) => ui.message(n.text + '.', 'warn'));
   net.on('chat', (c) => ui.message(`${c.from}: ${c.text}`, 'chat'));
   net.on('lobby', (l) => { App.lobby = l; });
   const allies = game.players.filter((p) => p.id !== m.you && game.isAlly(p.id, m.you)).map((p) => p.name);
+  if (m.world) return;
   ui.message(`Battle begins! You lead the ${EMPIRES[m.empires[m.you]].name}${allies.length ? `, allied with ${allies.join(', ')}` : ''}. Press Enter to chat.`);
 }
 
@@ -249,13 +291,14 @@ function togglePause() {
   if (showing) { $('pause').classList.add('hidden'); s.paused = false; return; }
   s.paused = s.mode === 'sp';
   $('pause-title').textContent = s.mode === 'sp' ? 'Paused' : 'Menu';
-  $('quit').textContent = s.campaign ? 'Retreat (auto-resolve the battle)' : 'Quit to Main Menu';
+  $('quit').textContent = s.campaign ? 'Retreat (auto-resolve the battle)'
+    : s.worldBattle ? 'Leave the battle (the computer commands your troops)' : 'Quit to Main Menu';
   $('pause').classList.remove('hidden');
 }
 
 function quitToMenu() {
   const s = App.session;
-  if (s && s.campaign) { $('pause').classList.add('hidden'); returnToCampaign(!s.ended); return; }
+  if (s && (s.campaign || s.worldBattle) && App.campaignUI) { $('pause').classList.add('hidden'); returnToCampaign(!s.ended); return; }
   if (s) s.ui.unbind();
   App.session = null;
   if (App.net) mpDisconnect();
@@ -275,7 +318,7 @@ function showEnd() {
     [['Units trained', 'trained'], ['Enemies killed', 'killed'], ['Units/buildings lost', 'lost'], ['Resources gathered', 'gathered'], ['Buildings built', 'built']]
       .map(([label, k]) => `<tr><td>${label}</td>${g.players.map((p) => `<td>${Math.floor(p.stats[k])}</td>`).join('')}</tr>`).join('') +
     `<tr><td>Game time</td><td colspan="${g.players.length}">${Math.floor(t / 60)}m ${t % 60}s</td></tr>`;
-  $('end-menu').textContent = s.campaign ? 'Return to World Map' : 'Main Menu';
+  $('end-menu').textContent = s.campaign || s.worldBattle ? 'Return to World Map' : 'Main Menu';
   $('end').classList.remove('hidden');
 }
 
@@ -290,7 +333,12 @@ function resize() {
 function frame(now) {
   requestAnimationFrame(frame);
   const s = App.session;
-  if (!s) { if (App.campaignUI && !$('campaign').classList.contains('hidden')) App.campaignUI.draw(); return; }
+  const fdt = Math.min(0.1, (now - (App.lastFrame || now)) / 1000);
+  App.lastFrame = now;
+  if (!s) {
+    if (App.campaignUI && !$('campaign').classList.contains('hidden')) { App.campaignUI.update(fdt); App.campaignUI.draw(); }
+    return;
+  }
   const dt = Math.min(0.1, (now - s.last) / 1000);
   s.last = now;
   const g = s.game;

@@ -1,13 +1,28 @@
 'use strict';
-// The world map campaign: a turn-based layer in the spirit of Total War. Countries own
-// provinces, collect gold, recruit armies and march them across the map. When armies meet,
-// the battle is fought in real time (Game with `battle`) or auto-resolved here.
-// No DOM access, so it runs headless in the tests.
+// The world map campaign: a real-time layer in the spirit of Total War. Two countries own
+// provinces, collect gold every month, recruit armies and march them along the roads while the
+// calendar runs. When armies meet, the battle is fought in real time (Game with `battle`) or
+// auto-resolved here. At the end of every year the World Council votes: a country that wins a
+// majority is elected World Leader and wins. No DOM access, so it runs in the browser (single
+// player), on the server (multiplayer worlds) and in the tests.
 
-const CAMPAIGN_HUMAN = 0;
-const CAMPAIGN_AI = 1;
+const COUNTRIES = [0, 1];
 const REBELS = 2;
 const MAX_ARMY = 40;
+const START_YEAR = 1200;
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+// Real-time length of one game year. Every year ends with a World Council vote.
+const YEAR_LENGTHS = [
+  { key: 'quick', seconds: 15 * 60, name: '15 minutes' },
+  { key: 'hour', seconds: 60 * 60, name: '1 hour' },
+  { key: 'long', seconds: 4 * 60 * 60, name: '4 hours' },
+];
+const DECISION_SECONDS = 30; // how long a player has to choose "fight" or "auto-resolve"
+const ENVOY_COST = 80;
+const ENVOY_FAVOR = 12;
+const FAVOR_TO_VOTE = 25; // a free province votes for the country it favors most, once favor reaches this
+const CONQUEST_FAVOR_LOSS = 10; // conquering a free province makes the others wary
+const CAPITAL_VOTES = 3;
 
 // Gold price to recruit one unit on the world map.
 const RECRUIT_COST = { spearman: 35, manatarms: 60, archer: 55, knight: 95, paladin: 125, longbowman: 75 };
@@ -15,6 +30,7 @@ const RECRUIT_COST = { spearman: 35, manatarms: 60, archer: 55, knight: 95, pala
 const UNIT_POWER = { spearman: 1, manatarms: 1.6, archer: 1.3, knight: 2.4, paladin: 3.3, longbowman: 1.7, leader: 4 };
 
 // Map coordinates are in a 1000 x 640 space. Owner: 0 = west country, 1 = east country, 2 = free lords.
+// Income is paid every month.
 const PROVINCES = [
   { name: 'Aldenhall', x: 150, y: 320, owner: 0, capital: true, income: 120 },
   { name: 'Wheatmere', x: 245, y: 165, owner: 0, income: 60 },
@@ -40,6 +56,8 @@ const LINKS = [
   [10, 11], [10, 12], [10, 13], [10, 14], [11, 13], [12, 14],
 ];
 const STARTING_ARMY = { spearman: 6, manatarms: 4, archer: 4, knight: 2 };
+const TOTAL_VOTES = PROVINCES.reduce((n, p) => n + (p.capital ? CAPITAL_VOTES : 1), 0);
+const VOTES_TO_WIN = Math.floor(TOTAL_VOTES / 2) + 1;
 
 function armyPower(units, leader) {
   let p = leader ? UNIT_POWER.leader : 0;
@@ -47,25 +65,30 @@ function armyPower(units, leader) {
   return p;
 }
 function armySize(units) { return Object.values(units).reduce((a, b) => a + b, 0); }
+function yearLength(key) { return (YEAR_LENGTHS.find((y) => y.key === key) || YEAR_LENGTHS[0]).seconds; }
 
-class Campaign {
-  // New campaign: { empire, seed }. Loading: pass a saved state as { state }.
-  constructor({ empire = 'aldermark', seed = 1, state } = {}) {
-    if (state) { this.s = state; this.adj = Campaign.adjacency(); return; }
-    const other = PLAYABLE_EMPIRES.find((k) => k !== empire) || empire;
+class World {
+  /**
+   * New world: { empires: [west, east] | empire, seed, yearLen (seconds), humans: [country ids] }.
+   * Loading: { state, humans }. `humans` lists the countries people control right now; the
+   * computer rules the others (and answers their battles). It is not saved: the host sets it.
+   */
+  constructor({ empire = 'aldermark', empires, seed = 1, yearLen = YEAR_LENGTHS[0].seconds, humans = [0], state } = {}) {
+    this.adj = World.adjacency();
+    this.humans = new Set(humans);
+    this.events = [];
+    if (state) { this.s = state; return; }
+    if (!empires) empires = [empire, PLAYABLE_EMPIRES.find((k) => k !== empire) || empire];
     this.s = {
-      version: 1, seed, turn: 1, empires: [empire, other, 'rebels'],
-      gold: [400, 400], provinces: PROVINCES.map((p, id) => ({ id, owner: p.owner, recruited: 0 })),
-      armies: [], nextArmy: 1, log: [], over: null, aiQueue: null,
+      version: 2, seed, time: 0, yearLen, empires: [empires[0], empires[1], 'rebels'],
+      gold: [400, 400],
+      provinces: PROVINCES.map((p, id) => ({ id, owner: p.owner, recruited: 0, favor: [0, 0], envoy: [-1, -1] })),
+      armies: [], battles: [], council: [], nextArmy: 1, nextBattle: 1, log: [], over: null, aiT: 0,
     };
-    this.adj = Campaign.adjacency();
     // Each country starts with its leader's army in its capital; the free lords garrison theirs.
-    for (const owner of [CAMPAIGN_HUMAN, CAMPAIGN_AI]) {
-      const cap = PROVINCES.findIndex((p) => p.capital && p.owner === owner);
-      this.addArmy(owner, cap, { ...STARTING_ARMY }, true);
-    }
+    for (const owner of COUNTRIES) this.addArmy(owner, this.capitalOf(owner), { ...STARTING_ARMY }, true);
     PROVINCES.forEach((p, id) => { if (p.garrison) this.addArmy(REBELS, id, { ...p.garrison }, false); });
-    this.log(`Turn 1. ${this.empireOf(CAMPAIGN_HUMAN).leader} rides out from ${this.capitalName(CAMPAIGN_HUMAN)}.`);
+    this.log(`${this.empireOf(0).leader} and ${this.empireOf(1).leader} claim the realm. The World Council meets at the end of every year.`);
   }
 
   static adjacency() {
@@ -74,13 +97,30 @@ class Campaign {
     return adj;
   }
 
+  // ---------- calendar ----------
+  get monthLen() { return this.s.yearLen / 12; }
+  monthIndex(t = this.s.time) { return Math.floor(t / this.monthLen + 1e-9); }
+  date(t = this.s.time) {
+    const m = this.monthIndex(t);
+    return { year: START_YEAR + Math.floor(m / 12), month: m % 12 };
+  }
+  dateText(t) { const d = this.date(t); return `${MONTHS[d.month]} ${d.year}`; }
+  untilCouncil() { return this.s.yearLen - (this.s.time % this.s.yearLen); }
+  // Seconds a march along one road takes: an average road is 1/48 of a year.
+  legTime(a, b) {
+    return (this.s.yearLen / 48) * (Math.hypot(PROVINCES[a].x - PROVINCES[b].x, PROVINCES[a].y - PROVINCES[b].y) / 150);
+  }
+
   // ---------- queries ----------
   empireOf(owner) { return EMPIRES[this.s.empires[owner]]; }
-  capitalName(owner) { return PROVINCES[PROVINCES.findIndex((p) => p.capital && p.owner === owner)].name; }
+  capitalOf(owner) { return PROVINCES.findIndex((p) => p.capital && p.owner === owner); }
   province(id) { return { ...PROVINCES[id], ...this.s.provinces[id] }; }
-  armyAt(prov, owner) { return this.s.armies.find((a) => a.prov === prov && (owner === undefined || a.owner === owner)); }
-  armiesAt(prov) { return this.s.armies.filter((a) => a.prov === prov); }
   army(id) { return this.s.armies.find((a) => a.id === id); }
+  battle(id) { return this.s.battles.find((b) => b.id === id); }
+  battleOf(armyId) { return this.s.battles.find((b) => b.attacker === armyId || b.defender === armyId); }
+  // Armies standing in a province (not on the road).
+  armiesAt(prov) { return this.s.armies.filter((a) => a.prov === prov && a.to === null); }
+  idleArmyAt(prov, owner) { return this.armiesAt(prov).find((a) => a.owner === owner && !this.battleOf(a.id)); }
   income(owner) {
     return this.s.provinces.reduce((s, p) => s + (p.owner === owner ? PROVINCES[p.id].income : 0), 0);
   }
@@ -94,14 +134,38 @@ class Campaign {
   recruitCost(owner, type) {
     return Math.round(RECRUIT_COST[type] * ((this.empireOf(owner).mods.unitCost || {})[type] || 1));
   }
+  // Where an army is on the map right now, in world coordinates.
+  armyPos(a, prog = a.prog) {
+    const p = PROVINCES[a.prov];
+    if (a.to === null) return { x: p.x, y: p.y };
+    const q = PROVINCES[a.to];
+    return { x: p.x + (q.x - p.x) * prog, y: p.y + (q.y - p.y) * prog };
+  }
+
+  /** Who each province would vote for if the Council met now. */
+  votes() {
+    const counts = [0, 0];
+    let abstain = 0;
+    const byProv = this.s.provinces.map((p) => {
+      const weight = PROVINCES[p.id].capital ? CAPITAL_VOTES : 1;
+      let vote = p.owner === REBELS ? null : p.owner;
+      if (p.owner === REBELS) {
+        const [a, b] = p.favor;
+        if (Math.max(a, b) >= FAVOR_TO_VOTE && a !== b) vote = a > b ? 0 : 1;
+      }
+      if (vote === null) abstain += weight; else counts[vote] += weight;
+      return vote;
+    });
+    return { counts, abstain, total: TOTAL_VOTES, need: VOTES_TO_WIN, byProv };
+  }
 
   log(text) {
-    this.s.log.push({ turn: this.s.turn, text });
-    if (this.s.log.length > 60) this.s.log.shift();
+    this.s.log.push({ t: this.s.time, text });
+    if (this.s.log.length > 80) this.s.log.shift();
   }
 
   addArmy(owner, prov, units, leader) {
-    const a = { id: this.s.nextArmy++, owner, prov, units, leader: !!leader, moved: false };
+    const a = { id: this.s.nextArmy++, owner, prov, units, leader: !!leader, to: null, prog: 0, path: [] };
     this.s.armies.push(a);
     return a;
   }
@@ -110,18 +174,19 @@ class Campaign {
     this.s.armies = this.s.armies.filter((a) => a.leader || armySize(a.units) > 0);
   }
 
-  // ---------- player actions ----------
+  // ---------- player orders (all check that `owner` may give them) ----------
   recruit(owner, prov, type) {
     const p = this.s.provinces[prov];
+    if (this.s.over) return { error: 'The war is over' };
+    if (!p || p.owner !== owner) return { error: 'You can only recruit in your own provinces' };
+    if (!RECRUIT_COST[type] || !this.recruitable(owner).some((r) => r.type === type)) return { error: 'Cannot recruit that' };
+    if (p.recruited >= this.recruitLimit(prov)) return { error: `${PROVINCES[prov].name} has no more recruits this month` };
     const cost = this.recruitCost(owner, type);
-    if (this.s.over) return { error: 'The campaign is over' };
-    if (p.owner !== owner) return { error: 'You can only recruit in your own provinces' };
-    if (!this.recruitable(owner).some((r) => r.type === type)) return { error: 'Cannot recruit that' };
-    if (p.recruited >= this.recruitLimit(prov)) return { error: `${PROVINCES[prov].name} has no more recruits this turn` };
     if (this.s.gold[owner] < cost) return { error: 'Not enough gold' };
-    let a = this.armyAt(prov, owner);
+    if (this.s.battles.some((b) => b.prov === prov)) return { error: 'A battle is raging there' };
+    let a = this.idleArmyAt(prov, owner);
     if (a && armySize(a.units) >= MAX_ARMY) return { error: `Armies are limited to ${MAX_ARMY} troops` };
-    if (!a) { a = this.addArmy(owner, prov, {}, false); a.moved = true; }
+    if (!a) a = this.addArmy(owner, prov, {}, false);
     this.s.gold[owner] -= cost;
     a.units[type] = (a.units[type] || 0) + 1;
     p.recruited++;
@@ -129,9 +194,10 @@ class Campaign {
   }
 
   // Split off half of every troop type (never the leader) into a new army in the same province.
-  split(armyId) {
+  split(owner, armyId) {
     const a = this.army(armyId);
-    if (!a || armySize(a.units) < 2) return { error: 'Not enough troops to split' };
+    if (!a || a.owner !== owner || a.to !== null || this.battleOf(a.id)) return { error: 'That army cannot split now' };
+    if (armySize(a.units) < 2) return { error: 'Not enough troops to split' };
     const units = {};
     for (const t in a.units) {
       const n = Math.floor(a.units[t] / 2);
@@ -141,51 +207,195 @@ class Campaign {
       const t = Object.keys(a.units).find((k) => a.units[k] > 0);
       units[t] = 1; a.units[t]--;
     }
-    const b = this.addArmy(a.owner, a.prov, units, false);
-    b.moved = a.moved;
-    return { army: b };
+    return { army: this.addArmy(a.owner, a.prov, units, false) };
   }
 
-  canMove(a, to) {
-    return !this.s.over && a && !a.moved && this.adj[a.prov].includes(to);
+  // Shortest road path from one province to another (excluding `from`).
+  route(from, dest) {
+    if (from === dest) return [];
+    const prev = new Map([[from, null]]);
+    const q = [from];
+    while (q.length) {
+      const cur = q.shift();
+      if (cur === dest) break;
+      for (const n of this.adj[cur]) if (!prev.has(n)) { prev.set(n, cur); q.push(n); }
+    }
+    if (!prev.has(dest)) return null;
+    const path = [];
+    for (let s = dest; s !== from; s = prev.get(s)) path.unshift(s);
+    return path;
   }
 
-  /**
-   * Move an army one province. Returns { moved } for a plain move or capture, or
-   * { battle } when the destination is defended: resolve it with fight results or autoResolve().
-   */
-  move(armyId, to) {
+  /** March an army to any province; it follows the roads and keeps going until it arrives. */
+  move(owner, armyId, dest) {
     const a = this.army(armyId);
-    if (!this.canMove(a, to)) return { error: 'That army cannot move there' };
-    const defender = this.armiesAt(to).find((d) => d.owner !== a.owner);
-    if (defender) {
-      a.moved = true;
-      return { battle: { attacker: a.id, defender: defender.id, prov: to, from: a.prov } };
+    if (this.s.over) return { error: 'The war is over' };
+    if (!a || a.owner !== owner) return { error: 'That is not your army' };
+    if (!PROVINCES[dest]) return { error: 'No such province' };
+    if (this.battleOf(a.id)) return { error: 'That army is in battle' };
+    if (a.to === null) {
+      const path = this.route(a.prov, dest);
+      if (!path || !path.length) return { error: 'Already there' };
+      a.to = path.shift(); a.prog = 0; a.path = path;
+      return { ok: true };
     }
-    this.enter(a, to);
-    return { moved: true };
+    // On the road: carry on, or turn back if that is shorter.
+    const ahead = this.route(a.to, dest), back = this.route(a.prov, dest);
+    if (back && (back.length + a.prog < ahead.length + 1 - a.prog) && back[0] !== a.to) {
+      [a.prov, a.to] = [a.to, a.prov];
+      a.prog = 1 - a.prog;
+      a.path = back;
+    } else a.path = ahead;
+    return { ok: true };
   }
 
-  enter(a, to) {
-    a.moved = true;
-    a.prov = to;
-    const p = this.s.provinces[to];
-    if (p.owner !== a.owner) {
-      const prev = p.owner;
-      p.owner = a.owner;
-      this.log(`${this.empireOf(a.owner).name} takes ${PROVINCES[to].name}${prev === REBELS ? ' from the free lords' : ''}.`);
+  /** Stop at the next province on the way. */
+  halt(owner, armyId) {
+    const a = this.army(armyId);
+    if (!a || a.owner !== owner) return { error: 'That is not your army' };
+    a.path = [];
+    return { ok: true };
+  }
+
+  /** Send an envoy with gifts to a free province: it favors you more at the next Council. */
+  envoy(owner, prov) {
+    const p = this.s.provinces[prov];
+    if (this.s.over) return { error: 'The war is over' };
+    if (!COUNTRIES.includes(owner)) return { error: 'Only countries send envoys' };
+    if (!p || p.owner !== REBELS) return { error: 'Envoys only go to the free provinces' };
+    if (p.envoy[owner] === this.monthIndex()) return { error: `Your envoy already visited ${PROVINCES[prov].name} this month` };
+    if (this.s.gold[owner] < ENVOY_COST) return { error: 'Not enough gold' };
+    this.s.gold[owner] -= ENVOY_COST;
+    p.envoy[owner] = this.monthIndex();
+    p.favor[owner] = Math.min(100, p.favor[owner] + ENVOY_FAVOR);
+    return { ok: true };
+  }
+
+  /** A human on one side of a pending battle chooses to fight it in real time or auto-resolve it. */
+  decide(owner, battleId, fight) {
+    const b = this.battle(battleId);
+    if (!b || b.state !== 'pending') return { error: 'That battle is not waiting for orders' };
+    if (owner !== this.army(b.attacker).owner && owner !== this.army(b.defender).owner) return { error: 'Not your battle' };
+    b.choices[owner] = fight ? 'fight' : 'auto';
+    this.settle(b);
+    return { ok: true };
+  }
+
+  // ---------- time ----------
+  /** Advance the world by `dt` seconds of real time. */
+  tick(dt) {
+    while (dt > 1e-9 && !this.s.over) {
+      const h = Math.min(dt, 1);
+      this.advance(h);
+      dt -= h;
     }
-    // Merge with a friendly army already there.
-    const other = this.s.armies.find((b) => b !== a && b.prov === to && b.owner === a.owner);
+  }
+
+  advance(h) {
+    const s = this.s;
+    const before = this.monthIndex();
+    s.time += h;
+    for (const a of [...s.armies]) {
+      if (a.to === null || this.battleOf(a.id) || !this.army(a.id)) continue;
+      a.prog += h / this.legTime(a.prov, a.to);
+      if (a.prog >= 1) this.arrive(a);
+      if (s.over) return;
+    }
+    this.contacts();
+    for (const b of [...s.battles]) if (b.state === 'pending') this.settle(b);
+    const now = this.monthIndex();
+    for (let m = before + 1; m <= now && !s.over; m++) this.newMonth(m);
+    s.aiT -= h;
+    if (s.aiT <= 0 && !s.over) {
+      s.aiT = Math.max(2, s.yearLen / 240);
+      for (const owner of COUNTRIES) if (!this.humans.has(owner)) this.aiThink(owner);
+    }
+  }
+
+  arrive(a) {
+    a.prov = a.to; a.to = null; a.prog = 0;
+    const prov = a.prov;
+    // Enemies here: stop and fight (contacts() starts the battle).
+    if (this.armiesAt(prov).some((o) => o.owner !== a.owner)) { a.path = []; return; }
+    this.capture(a.owner, prov);
+    if (a.path.length) { a.to = a.path.shift(); return; }
+    // Journey's end: join a friendly army waiting here.
+    const other = this.armiesAt(prov).find((b) => b !== a && b.owner === a.owner && !this.battleOf(b.id) && !b.path.length);
     if (other) {
       for (const t in a.units) other.units[t] = (other.units[t] || 0) + a.units[t];
       other.leader = other.leader || a.leader;
       a.units = {}; a.leader = false;
       this.removeEmpty();
     }
+  }
+
+  capture(owner, prov) {
+    const p = this.s.provinces[prov];
+    if (p.owner === owner) return;
+    const prev = p.owner;
+    p.owner = owner;
+    p.recruited = this.recruitLimit(prov); // no recruits from freshly taken land this month
+    this.log(`${this.empireOf(owner).name} takes ${PROVINCES[prov].name}${prev === REBELS ? ' from the free lords' : ''}.`);
+    if (prev === REBELS) {
+      for (const q of this.s.provinces) if (q.owner === REBELS) q.favor[owner] = Math.max(0, q.favor[owner] - CONQUEST_FAVOR_LOSS);
+    }
     this.checkOver();
   }
 
+  // Hostile armies standing in the same province fight.
+  contacts() {
+    for (let prov = 0; prov < PROVINCES.length; prov++) {
+      if (this.s.battles.some((b) => b.prov === prov)) continue;
+      const here = this.armiesAt(prov);
+      if (here.length < 2) continue;
+      const owner = this.s.provinces[prov].owner;
+      const def = here.find((a) => a.owner === owner) || here[0];
+      const att = here.find((a) => a.owner !== def.owner);
+      if (att) this.startBattle(att, def, prov);
+      if (this.s.over) return;
+    }
+  }
+
+  startBattle(att, def, prov) {
+    const b = { id: this.s.nextBattle++, prov, attacker: att.id, defender: def.id, state: 'pending', deadline: this.s.time + DECISION_SECONDS, choices: {} };
+    this.s.battles.push(b);
+    if (![att.owner, def.owner].some((o) => this.humans.has(o))) { this.autoResolve(b); return; }
+    this.events.push({ type: 'battle', id: b.id });
+  }
+
+  // A pending battle goes ahead once every human side has chosen, or when time is up.
+  settle(b) {
+    const sides = [this.army(b.attacker).owner, this.army(b.defender).owner].filter((o) => this.humans.has(o));
+    if (!sides.every((o) => b.choices[o]) && this.s.time < b.deadline) return;
+    if (Object.values(b.choices).includes('fight')) {
+      b.state = 'fighting';
+      this.events.push({ type: 'fight', id: b.id });
+    } else this.autoResolve(b);
+  }
+
+  newMonth(m) {
+    const s = this.s;
+    if (m % 12 === 0) { this.council(START_YEAR + m / 12 - 1); if (s.over) return; }
+    for (const owner of COUNTRIES) s.gold[owner] += this.income(owner);
+    for (const p of s.provinces) p.recruited = 0;
+    for (const owner of COUNTRIES) if (!this.humans.has(owner)) { this.aiEnvoys(owner); this.aiRecruit(owner); }
+  }
+
+  /** The World Council: every province casts its votes; a majority elects the World Leader. */
+  council(year) {
+    const v = this.votes();
+    this.s.council.push({ year, counts: v.counts, abstain: v.abstain });
+    const winner = COUNTRIES.find((o) => v.counts[o] >= v.need);
+    const tally = `${this.empireOf(0).name} ${v.counts[0]}, ${this.empireOf(1).name} ${v.counts[1]}, ${v.abstain} abstain`;
+    if (winner !== undefined) {
+      const e = this.empireOf(winner);
+      this.log(`The Council of ${year} elects ${e.leader} World Leader (${tally}).`);
+      this.s.over = { winner, vote: true, reason: `The Council of ${year} elects ${e.leader} of the ${e.name} World Leader with ${v.counts[winner]} of ${v.total} votes.` };
+    } else this.log(`The Council of ${year} is divided (${tally}). ${v.need} votes are needed.`);
+    this.events.push({ type: 'council', year, counts: v.counts, abstain: v.abstain, winner });
+  }
+
+  // ---------- battles ----------
   // Odds for the attacker winning an auto-resolved battle.
   odds(battle) {
     const a = this.army(battle.attacker), d = this.army(battle.defender);
@@ -219,113 +429,118 @@ class Campaign {
     const fallen = [];
     [a, d].forEach((army, i) => {
       if (army.leader && !survivors[i].leader) fallen.push(army.owner);
-      army.units = survivors[i].units;
+      army.units = { ...survivors[i].units };
       army.leader = survivors[i].leader;
     });
     const winner = attackerWon ? a : d;
-    this.log(`Battle of ${name}: ${this.empireOf(winner.owner).name} ${attackerWon ? 'storms' : 'holds'} ${name}.`);
+    this.s.battles = this.s.battles.filter((b) => b !== battle && b.id !== battle.id);
+    this.log(`Battle of ${name}: the ${this.empireOf(winner.owner).name} ${attackerWon ? 'storm' : 'hold'} ${name}.`);
+    this.events.push({ type: 'resolved', id: battle.id, prov: battle.prov, winner: winner.owner, loser: (attackerWon ? d : a).owner });
     for (const owner of fallen) {
       if (owner === REBELS) continue;
       this.log(`${this.empireOf(owner).leader} has fallen at ${name}!`);
       this.s.over = { winner: 1 - owner, reason: `${this.empireOf(owner).leader} has fallen at the Battle of ${name}.` };
     }
-    // The loser is destroyed; a winning attacker marches in.
+    // The loser is destroyed; a winning attacker takes the province.
     if (attackerWon) { d.units = {}; d.leader = false; } else { a.units = {}; a.leader = false; }
     this.removeEmpty();
-    if (attackerWon && this.army(a.id) && !this.s.over) this.enter(a, battle.prov);
+    if (attackerWon && this.army(a.id) && !this.s.over) this.capture(a.owner, battle.prov);
     this.checkOver();
     return { attackerWon };
   }
 
   checkOver() {
     if (this.s.over) return this.s.over;
-    for (const owner of [CAMPAIGN_HUMAN, CAMPAIGN_AI]) {
+    for (const owner of COUNTRIES) {
       if (!this.s.provinces.some((p) => p.owner === owner)) {
-        this.s.over = { winner: 1 - owner, reason: `${this.empireOf(owner).name} has lost all its lands.` };
+        this.s.over = { winner: 1 - owner, reason: `The ${this.empireOf(owner).name} has lost all its lands.` };
       }
     }
     return this.s.over;
   }
 
-  // ---------- turns ----------
-  /** End the human's turn and start the AI's. Returns the first battle the human must decide on, if any. */
-  endTurn() {
-    if (this.s.over) return null;
-    this.s.aiQueue = this.planAi();
-    return this.continueAi();
+  // Everything a real-time battle needs. `first` is the country that plays as player 0
+  // (the human in single player); by default the attacker.
+  battleSetup(battle, first) {
+    const a = this.army(battle.attacker), d = this.army(battle.defender);
+    const sides = first === d.owner ? [d, a] : [a, d];
+    return {
+      seed: this.s.seed * 1000 + battle.prov * 37 + battle.id,
+      empires: sides.map((x) => this.s.empires[x.owner]),
+      owners: sides.map((x) => x.owner),
+      battle: { armies: sides.map((x) => ({ units: { ...x.units }, leader: x.leader })) },
+      name: `Battle of ${PROVINCES[battle.prov].name}`,
+    };
   }
 
-  /** Run queued AI moves until one attacks the human (returned) or the turn finishes (null). */
-  continueAi() {
-    while (this.s.aiQueue && this.s.aiQueue.length && !this.s.over) {
-      const { army, to } = this.s.aiQueue.shift();
-      const a = this.army(army);
-      if (!this.canMove(a, to)) continue;
-      const r = this.move(a.id, to);
-      if (r.battle) {
-        const d = this.army(r.battle.defender);
-        if (d.owner === CAMPAIGN_HUMAN) return r.battle;
-        this.autoResolve(r.battle);
-      }
-    }
-    this.finishRound();
-    return null;
+  /** Apply the result of a real-time battle: survivors from Game.survivors() and the winning country. */
+  applyFought(battle, owners, survivors, winnerOwner) {
+    const att = this.army(battle.attacker);
+    const iAtt = owners.indexOf(att.owner);
+    const attackerWon = winnerOwner === att.owner;
+    const empty = { units: {}, leader: false };
+    const sa = survivors[iAtt], sd = survivors[1 - iAtt];
+    return this.applyBattle(battle, [attackerWon ? sa : empty, attackerWon ? empty : sd], attackerWon);
   }
 
-  finishRound() {
-    this.s.aiQueue = null;
-    if (this.s.over) return;
-    for (const owner of [CAMPAIGN_HUMAN, CAMPAIGN_AI]) this.s.gold[owner] += this.income(owner);
-    for (const p of this.s.provinces) p.recruited = 0;
-    for (const a of this.s.armies) { a.moved = false; }
-    this.s.turn++;
-    this.aiRecruit(); // the AI spends at the start of its next turn's planning window
-    this.log(`Turn ${this.s.turn}. Your treasury collects ${this.income(CAMPAIGN_HUMAN)} gold.`);
-  }
-
-  // ---------- computer opponent ----------
-  aiRecruit() {
-    const me = CAMPAIGN_AI;
-    const owned = this.s.provinces.filter((p) => p.owner === me).map((p) => p.id);
+  // ---------- computer rulers ----------
+  aiRecruit(owner) {
+    const owned = this.s.provinces.filter((p) => p.owner === owner).map((p) => p.id);
     // Recruit at the frontier first, then the capital.
-    const frontier = owned.filter((id) => this.adj[id].some((n) => this.s.provinces[n].owner !== me));
-    const cap = PROVINCES.findIndex((p) => p.capital && p.owner === me);
-    const spots = [...new Set([...frontier, ...(this.s.provinces[cap].owner === me ? [cap] : [])])];
-    const rng = mulberry32(this.s.seed * 13 + this.s.turn);
+    const frontier = owned.filter((id) => this.adj[id].some((n) => this.s.provinces[n].owner !== owner));
+    const cap = this.capitalOf(owner);
+    const spots = [...new Set([...frontier, ...(this.s.provinces[cap].owner === owner ? [cap] : [])])];
+    const rng = mulberry32(this.s.seed * 13 + this.monthIndex() * 7 + owner);
     let guard = 200;
-    while (guard-- > 0 && spots.length) {
+    while (guard-- > 0 && spots.length && this.s.gold[owner] >= 120) { // keep a small reserve
       const prov = spots[Math.floor(rng() * spots.length)];
-      const opts = this.recruitable(me);
-      const pick = opts[Math.floor(rng() * opts.length)];
-      if (this.s.gold[me] < 120) break; // keep a small reserve
-      const r = this.recruit(me, prov, pick.type);
-      if (r.error && /no more recruits|limited/.test(r.error)) spots.splice(spots.indexOf(prov), 1);
+      const opts = this.recruitable(owner);
+      const r = this.recruit(owner, prov, opts[Math.floor(rng() * opts.length)].type);
+      if (r.error && !/gold/.test(r.error)) spots.splice(spots.indexOf(prov), 1);
     }
   }
 
-  planAi() {
-    const me = CAMPAIGN_AI, plan = [];
-    const mine = this.s.armies.filter((a) => a.owner === me && !a.moved);
-    const cap = PROVINCES.findIndex((p) => p.capital && p.owner === me);
-    for (const a of mine) {
+  // Court the free provinces that could swing the Council.
+  aiEnvoys(owner) {
+    const v = this.votes();
+    if (v.counts[owner] >= v.need + 2) return;
+    const other = 1 - owner;
+    const free = this.s.provinces.filter((p) => p.owner === REBELS)
+      .sort((a, b) => (a.favor[owner] - a.favor[other]) - (b.favor[owner] - b.favor[other]));
+    let sent = 0;
+    for (const p of free) {
+      if (sent >= 2 || this.s.gold[owner] < ENVOY_COST + 150) break;
+      if (p.favor[owner] - p.favor[other] > 20) continue;
+      if (!this.envoy(owner, p.id).error) sent++;
+    }
+  }
+
+  aiThink(owner) {
+    const cap = this.capitalOf(owner);
+    for (const a of this.s.armies) {
+      if (a.owner !== owner || a.to !== null || this.battleOf(a.id)) continue;
       // The leader's army only leaves the capital when it is overwhelming.
-      if (a.leader && this.power(a) < 30) continue;
+      if (a.leader && this.power(a) < 30) {
+        if (a.prov !== cap && this.s.provinces[cap].owner === owner) this.move(owner, a.id, cap);
+        continue;
+      }
       const targets = this.adj[a.prov]
-        .filter((n) => this.s.provinces[n].owner !== me)
+        .filter((n) => this.s.provinces[n].owner !== owner)
+        // Free provinces that already back us at the Council are left in peace.
+        .filter((n) => { const p = this.s.provinces[n]; return !(p.owner === REBELS && p.favor[owner] >= FAVOR_TO_VOTE && p.favor[owner] > p.favor[1 - owner]); })
         .map((n) => {
-          const d = this.armiesAt(n).find((x) => x.owner !== me);
-          return { n, def: d ? this.power(d) : 0, value: PROVINCES[n].income + (PROVINCES[n].capital ? 200 : 0) };
+          const d = this.armiesAt(n).filter((x) => x.owner !== owner).reduce((t, x) => t + this.power(x), 0);
+          return { n, def: d, value: PROVINCES[n].income + (PROVINCES[n].capital ? 200 : 0) };
         })
         .filter((t) => this.power(a) > t.def * 1.3)
         .sort((x, y) => y.value / (y.def + 1) - x.value / (x.def + 1));
-      if (targets.length) { plan.push({ army: a.id, to: targets[0].n }); continue; }
+      if (targets.length) { this.move(owner, a.id, targets[0].n); continue; }
       // Nothing to attack here: march toward the nearest province we do not hold.
       if (!a.leader) {
-        const step = this.stepToward(a.prov, (id) => this.s.provinces[id].owner !== me);
-        if (step !== null && step !== cap) plan.push({ army: a.id, to: step });
+        const step = this.stepToward(a.prov, (id) => this.s.provinces[id].owner !== owner);
+        if (step !== null && step !== cap && this.s.provinces[step].owner === owner) this.move(owner, a.id, step);
       }
     }
-    return plan;
   }
 
   // First step of a shortest path from `from` to any province matching `goal`.
@@ -342,27 +557,6 @@ class Campaign {
       for (const n of this.adj[cur]) if (!prev.has(n)) { prev.set(n, cur); q.push(n); }
     }
     return null;
-  }
-
-  // Everything a real-time battle needs, with the human always as player 0.
-  battleSetup(battle) {
-    const a = this.army(battle.attacker), d = this.army(battle.defender);
-    const sides = a.owner === CAMPAIGN_HUMAN ? [a, d] : [d, a];
-    return {
-      seed: this.s.seed * 1000 + battle.prov * 37 + this.s.turn,
-      empires: sides.map((x) => this.s.empires[x.owner]),
-      ai: [false, true],
-      battle: { armies: sides.map((x) => ({ units: { ...x.units }, leader: x.leader })) },
-      humanIsAttacker: a.owner === CAMPAIGN_HUMAN,
-    };
-  }
-
-  // Apply the result of a real-time battle (survivors from Game.survivors(), human first).
-  applyFought(battle, survivors, humanWon) {
-    const setup = this.battleSetup(battle);
-    const [att, def] = setup.humanIsAttacker ? survivors : [survivors[1], survivors[0]];
-    const attackerWon = setup.humanIsAttacker ? humanWon : !humanWon;
-    return this.applyBattle(battle, [attackerWon ? att : { units: {}, leader: false }, attackerWon ? { units: {}, leader: false } : def], attackerWon);
   }
 
   toJSON() { return this.s; }

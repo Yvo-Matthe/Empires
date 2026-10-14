@@ -113,6 +113,12 @@ class Game {
     });
   }
 
+  // Hand a player over to the computer (a battle player who left) or back to a human.
+  setAi(pid, on) {
+    this.players[pid].ai = !!on;
+    this.ais[pid] = on ? new AIController(this, pid) : null;
+  }
+
   isEnemy(a, b) { return a !== b && this.players[a].team !== this.players[b].team; }
   isAlly(a, b) { return a === b || this.players[a].team === this.players[b].team; }
 

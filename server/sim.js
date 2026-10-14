@@ -15,7 +15,8 @@ function loadSim() {
   }
   // Script-level const/class declarations are not properties of the context, so collect them.
   return vm.runInContext(`({ Game, Pathfinder, generateMap, mapConnected, makeSnapshot, EMPIRES, UNITS, BUILDINGS,
-    DIFFICULTY, TILE, MAP_W, MAP_H, TICK, START_POS, MAX_PLAYERS, PLAYABLE_EMPIRES, Campaign, PROVINCES, armySize })`, ctx);
+    DIFFICULTY, TILE, MAP_W, MAP_H, TICK, START_POS, MAX_PLAYERS, PLAYABLE_EMPIRES, World, PROVINCES, armySize, yearLength,
+    YEAR_LENGTHS, VOTES_TO_WIN, TOTAL_VOTES })`, ctx);
 }
 
 module.exports = { loadSim };

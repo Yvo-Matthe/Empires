@@ -96,3 +96,81 @@ test('a host can fill a room with AI players and teams', async (t) => {
   assert.strictEqual(s.over, null);
   a.ws.close();
 });
+
+function startServer(t, port, env = {}) {
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'server', 'index.js')], { env: { ...process.env, PORT: port, ...env } });
+  t.after(() => srv.kill());
+  return new Promise((r) => srv.stdout.once('data', () => r(srv)));
+}
+
+test('a multiplayer world: co-op rulers, a rival, real-time battles and rejoining after a restart', async (t) => {
+  const fs = require('fs');
+  const os = require('os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'empires-worlds-'));
+  const env = { WORLD_DIR: dir, WORLD_SPEED: 20, MATCH_SPEED: 10 };
+  const port = PORT + 2;
+  const srv = await startServer(t, port, env);
+  const a = client(port), b = client(port), c = client(port);
+  await Promise.all([a.open, b.open, c.open]);
+
+  a.send({ t: 'createWorld', name: 'Anna', empire: 'aldermark', year: 'quick' });
+  const you = await a.next('wyou');
+  assert.strictEqual(you.country, 0);
+  const { code } = await a.next('world');
+  // Picking the same empire joins that country (co-op); the other empire is the rival.
+  b.send({ t: 'join', code, name: 'Bram', empire: 'aldermark' });
+  c.send({ t: 'join', code, name: 'Cleo', empire: 'valmont' });
+  assert.strictEqual((await b.next('wyou')).country, 0);
+  assert.strictEqual((await c.next('wyou')).country, 1);
+  await a.next('world', (m) => m.players.length === 3 && m.players.every((p) => p.online));
+
+  // Co-op rulers share the treasury and the armies; the rival cannot command them.
+  a.send({ t: 'wcmd', c: 'recruit', prov: 0, type: 'spearman' });
+  await b.next('world', (m) => m.s.armies.some((x) => x.owner === 0 && x.leader && x.units.spearman === 7));
+  let w = (await a.next('world'));
+  const lead = w.s.armies.find((x) => x.owner === 0 && x.leader);
+  c.send({ t: 'wcmd', c: 'move', army: lead.id, to: 5 });
+  assert.match((await c.next('notice')).text, /not your army/);
+  b.send({ t: 'wcmd', c: 'move', army: lead.id, to: 5 });
+  w = await a.next('world', (m) => m.s.battles.length > 0, 20000);
+  const battle = w.s.battles[0];
+  assert.strictEqual(battle.prov, 5);
+
+  // Anna chooses to fight: both rulers of Aldermark are pulled into the same real-time battle.
+  a.send({ t: 'wcmd', c: 'decide', battle: battle.id, fight: true });
+  const [sa, sb] = await Promise.all([a.next('start'), b.next('start')]);
+  assert.ok(sa.world && sa.battle);
+  assert.strictEqual(sa.you, 0);
+  assert.strictEqual(sb.you, 0);
+  assert.deepStrictEqual(sa.ai, [false, true]);
+  await a.next('snap');
+  // Both leave the battle: the computer finishes it for them and the world takes the result.
+  a.send({ t: 'leaveBattle' });
+  b.send({ t: 'leaveBattle' });
+  w = await c.next('world', (m) => m.s.battles.length === 0 && m.s.provinces[5].owner === 0, 60000);
+  assert.ok(w.s.armies.find((x) => x.id === lead.id).leader, 'the leader survived');
+
+  // Cleo drops out and comes back to the same country.
+  c.ws.close();
+  await a.next('world', (m) => m.players.some((p) => p.name === 'Cleo' && !p.online));
+  const c2 = client(port);
+  await c2.open;
+  c2.send({ t: 'join', code, name: 'cleo', empire: 'aldermark' });
+  assert.strictEqual((await c2.next('wyou')).country, 1);
+
+  // The world is saved to disk and survives a server restart.
+  const date = (await c2.next('world')).s.time;
+  for (const x of [a, b, c2]) x.ws.close();
+  await new Promise((r) => setTimeout(r, 300));
+  srv.kill();
+  await startServer(t, port + 1, env);
+  const d = client(port + 1);
+  await d.open;
+  d.send({ t: 'join', code, name: 'Anna', empire: 'valmont' });
+  assert.strictEqual((await d.next('wyou')).country, 0);
+  const back = await d.next('world');
+  assert.ok(back.s.time >= date - 1);
+  assert.strictEqual(back.s.provinces[5].owner, 0);
+  d.ws.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -151,3 +151,18 @@ h2 { color: var(--gold); font-weight: normal; letter-spacing: 2px; }
   #info { display: none; }
   h1 { font-size: 42px; letter-spacing: 6px; }
 }
+#cmp-speed { display: flex; gap: 2px; }
+#cmp-speed button { min-width: 40px; padding: 4px 8px; }
+#cmp-speed button.active { background: var(--gold); color: #1b150f; }
+.council-bar { position: relative; display: flex; height: 14px; border: 1px solid var(--edge); border-radius: 3px; overflow: hidden; margin: 4px 0; }
+.council-bar span { display: block; }
+.council-bar i { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #fff; }
+.council-legend { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+.favor { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 3px 0; }
+.favor > span { width: 150px; }
+.favor .bar { position: relative; flex: 1; height: 8px; background: #00000060; border-radius: 3px; }
+.favor .bar span { display: block; height: 100%; border-radius: 3px; }
+.favor .bar i { position: absolute; top: -2px; bottom: -2px; width: 1px; background: #fff; }
+#cmp-side .envoy { margin: 6px 0 2px; }
+#cmp-chat input { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+label.inline { display: inline; }

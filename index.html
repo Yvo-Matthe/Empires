@@ -20,9 +20,11 @@
         <button class="tab" data-tab="mp">Multiplayer</button>
       </div>
       <div id="cmp-panel" class="panel">
-        <p class="notice">Conquer the realm on a turn-based world map. Recruit armies, march them from province
-          to province, and fight every battle in real time or auto-resolve it. Your leader commands your main army:
-          if your leader falls, your campaign ends.</p>
+        <p class="notice">Rule a country on a real-time world map. Gold comes in every month; recruit armies, march
+          them along the roads and fight every battle in real time or auto-resolve it. At the end of every year the
+          World Council votes: win a majority and you are elected World Leader. Your leader commands your main army:
+          if your leader falls, your reign ends. For co-op or versus worlds with friends, open the Multiplayer tab.</p>
+        <label>One game year lasts <select id="cmp-year" class="year-select"></select></label>
         <button id="cmp-new" class="primary">New Campaign</button>
         <button id="cmp-continue">Continue Campaign</button>
       </div>
@@ -43,10 +45,15 @@
         </div>
         <div id="mp-form">
           <label>Your name <input id="mp-name" maxlength="16" placeholder="Lord"></label>
-          <button id="mp-create" class="primary">Create Room</button>
+          <button id="mp-create" class="primary">Create Battle Room</button>
+          <button id="mp-create-world" class="primary">Create World</button>
+          <label class="inline">year <select id="mp-year" class="year-select"></select></label>
           <span class="or">or</span>
           <input id="mp-code" maxlength="4" placeholder="CODE" class="code-input">
-          <button id="mp-join">Join Room</button>
+          <button id="mp-join">Join</button>
+          <div class="hint">A <b>battle room</b> is one real-time match for up to 4 players and AI. A <b>world</b> is a
+            campaign on the world map that keeps going between sessions: pick the same empire as a friend to rule it
+            together (co-op), or the other empire to fight each other. To come back later, join with the same code and name.</div>
         </div>
         <div id="mp-lobby" class="hidden">
           <div>Room code: <b id="mp-room-code" class="room-code"></b> <span class="hint">Share this code with the other players.</span></div>
@@ -93,10 +100,13 @@
 
   <!-- World map -->
   <div id="campaign" class="hidden">
-    <div id="cmp-top"><div id="cmp-top-info"></div><button id="cmp-end" class="primary">End Turn</button><button id="cmp-quit">Save &amp; Exit</button></div>
+    <div id="cmp-top"><div id="cmp-top-info"></div>
+      <div id="cmp-speed"><button data-speed="0" title="Pause">⏸</button><button data-speed="1">1×</button><button data-speed="4">4×</button><button data-speed="16">16×</button></div><button id="cmp-quit">Save &amp; Exit</button></div>
     <div id="cmp-body">
       <canvas id="cmp-map"></canvas>
-      <aside id="cmp-side"><div id="cmp-info"></div><h3>Chronicle</h3><div id="cmp-log"></div></aside>
+      <aside id="cmp-side"><div id="cmp-info"></div><h3>Chronicle</h3>
+        <div id="cmp-chat" class="hidden"><input id="cmp-chat-input" maxlength="200" placeholder="Message your fellow rulers… (Enter)"></div>
+        <div id="cmp-log"></div></aside>
     </div>
     <div id="cmp-toast" class="hidden"></div>
   </div>
@@ -105,6 +115,7 @@
       <h2 id="cmp-battle-title"></h2>
       <div id="cmp-battle-sides"></div>
       <p id="cmp-battle-odds"></p>
+      <p id="cmp-battle-timer" class="muted"></p>
       <div><button id="cmp-fight" class="primary">⚔️ Fight the Battle</button> <button id="cmp-auto">🎲 Auto-resolve</button></div>
     </div>
   </div>

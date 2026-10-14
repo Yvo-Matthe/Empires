@@ -331,8 +331,9 @@ class UI {
     const p = this.me;
     $('topbar').innerHTML = `
       <div class="empire" style="--pc:${p.color}"><span class="crest"></span>${p.empire.name}</div>
-      ${RESOURCES.map((r) => `<div class="res" title="${r}">${RES_ICON[r]} <b id="res-${r}">0</b></div>`).join('')}
-      <div class="res" title="Population">👥 <b id="res-pop">0</b></div>
+      ${this.game.battle ? `<div class="res">⚔️ <b>${this.game.battleName || 'Battle'}</b></div><div class="res" id="battle-count"></div>` :
+    `${RESOURCES.map((r) => `<div class="res" title="${r}">${RES_ICON[r]} <b id="res-${r}">0</b></div>`).join('')}
+      <div class="res" title="Population">👥 <b id="res-pop">0</b></div>`}
       <div class="clock" id="clock">00:00</div>
       <button id="menu-btn" title="Menu (P)">☰</button>`;
     $('menu-btn').onclick = () => this.onPause && this.onPause();
@@ -340,10 +341,15 @@ class UI {
 
   updateTopbar() {
     const p = this.me;
-    for (const r of RESOURCES) $('res-' + r).textContent = Math.floor(p.res[r]);
-    const popEl = $('res-pop');
-    popEl.textContent = `${p.pop}/${p.popCap}`;
-    popEl.classList.toggle('capped', p.pop >= p.popCap);
+    if (this.game.battle) {
+      const count = (pid) => this.game.entities.filter((e) => e.owner === pid && !e.dead).length;
+      $('battle-count').innerHTML = this.game.players.map((pl) => `<span style="color:${pl.color}">${count(pl.id)}</span>`).join(' vs ');
+    } else {
+      for (const r of RESOURCES) $('res-' + r).textContent = Math.floor(p.res[r]);
+      const popEl = $('res-pop');
+      popEl.textContent = `${p.pop}/${p.popCap}`;
+      popEl.classList.toggle('capped', p.pop >= p.popCap);
+    }
     const t = Math.floor(this.game.time);
     $('clock').textContent = `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
   }

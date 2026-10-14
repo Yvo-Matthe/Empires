@@ -4,12 +4,14 @@
 const INTERACT = 18; // px, edge distance at which peasants gather/build/drop off
 
 class Game {
-  constructor({ seed = 1, empires = ['aldermark', 'valmont'], difficulty = 'normal', ai = [false, true], teams, viewer } = {}) {
+  constructor({ seed = 1, empires = ['aldermark', 'valmont'], difficulty = 'normal', ai = [false, true], teams, viewer, battle } = {}) {
     if (empires.length < 2 || empires.length > MAX_PLAYERS) throw new Error(`A game needs 2-${MAX_PLAYERS} players`);
     // Players on the same team are allies; by default everyone fights alone.
     teams = teams || empires.map((_, i) => i + 1);
     this.seed = seed;
     this.map = generateMap(seed);
+    // Battle mode (from the world map): armies only, no economy. battle = { armies: [{ units: {type: n}, leader }] }
+    this.battle = battle || null;
     this.time = 0;
     this.nextId = 1;
     this.entities = [];
@@ -39,7 +41,8 @@ class Game {
       stats: { trained: 0, killed: 0, lost: 0, gathered: 0, built: 0 },
     }));
 
-    for (const p of this.players) {
+    if (battle) this.setupBattle(battle);
+    else for (const p of this.players) {
       const s = START_POS[p.id];
       const tc = this.addBuilding(p.id, 'towncenter', s.x - 2, s.y - 2, true);
       // Two men and two women to work the land, and the leader: the player in the game.
@@ -53,6 +56,61 @@ class Game {
     this.ais = this.players.map((p) => (p.ai ? new AIController(this, p.id) : null));
     this.updatePop();
     this.computeVision();
+  }
+
+  // Armies face each other across the middle of the map.
+  setupBattle(battle) {
+    const c = MAP_W / 2;
+    const spots = [[c - 14, c + 14], [c + 13, c - 13]];
+    for (const p of this.players) {
+      p.res = { food: 0, wood: 0, stone: 0, gold: 0 };
+      const [sx, sy] = spots[p.id];
+      this.clearArea(sx, sy, 8);
+      const army = battle.armies[p.id];
+      const types = Object.entries(army.units).flatMap(([t, n]) => Array(n).fill(t));
+      // Ranged units in the back rows, the leader behind them.
+      types.sort((a, b) => (UNITS[a].range > 1) - (UNITS[b].range > 1));
+      const facing = Math.atan2(c - sy, c - sx), back = facing + Math.PI, side = facing + Math.PI / 2;
+      const cols = Math.max(4, Math.ceil(Math.sqrt(types.length * 2)));
+      types.forEach((t, i) => {
+        const row = Math.floor(i / cols), col = i % cols - (cols - 1) / 2;
+        const x = (sx + 0.5) * TILE + Math.cos(side) * col * 24 + Math.cos(back) * row * 26;
+        const y = (sy + 0.5) * TILE + Math.sin(side) * col * 24 + Math.sin(back) * row * 26;
+        this.addUnit(p.id, t, x, y);
+      });
+      if (army.leader) {
+        const rows = Math.ceil(types.length / cols) + 1;
+        p.leaderId = this.addUnit(p.id, 'leader', (sx + 0.5) * TILE + Math.cos(back) * rows * 26, (sy + 0.5) * TILE + Math.sin(back) * rows * 26).id;
+      }
+    }
+    for (const e of this.entities) e.facing = e.x < MAP_W * TILE / 2 ? 1 : -1;
+  }
+
+  // Remove trees, rocks and water around a tile so armies have room to deploy.
+  clearArea(cx, cy, r) {
+    for (let y = cy - r; y <= cy + r; y++) for (let x = cx - r; x <= cx + r; x++) {
+      if (x < 1 || y < 1 || x >= MAP_W - 1 || y >= MAP_H - 1 || Math.hypot(x - cx, y - cy) > r) continue;
+      const i = y * MAP_W + x;
+      const n = this.map.nodeAt[i];
+      if (n) { this.map.nodeAt[i] = null; n.dead = true; }
+      this.map.terrain[i] = T_GRASS;
+      this.map.block[i] = B_FREE;
+    }
+    this.map.nodes = this.map.nodes.filter((n) => !n.dead);
+  }
+
+  // Surviving troops per player once a battle is over.
+  survivors() {
+    return this.players.map((p) => {
+      const units = {};
+      let leader = false;
+      for (const u of this.entities) {
+        if (u.owner !== p.id || u.dead || u.entity !== 'unit') continue;
+        if (u.type === 'leader') leader = true;
+        else units[u.type] = (units[u.type] || 0) + 1;
+      }
+      return { units, leader };
+    });
   }
 
   isEnemy(a, b) { return a !== b && this.players[a].team !== this.players[b].team; }

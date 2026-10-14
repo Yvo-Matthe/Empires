@@ -15,10 +15,18 @@
       <h2>Choose your empire</h2>
       <div id="empire-cards" class="cards"></div>
       <div class="tabs">
-        <button class="tab active" data-tab="sp">Single Player</button>
+        <button class="tab active" data-tab="cmp">World Campaign</button>
+        <button class="tab" data-tab="sp">Skirmish</button>
         <button class="tab" data-tab="mp">Multiplayer</button>
       </div>
-      <div id="sp-panel" class="panel">
+      <div id="cmp-panel" class="panel">
+        <p class="notice">Conquer the realm on a turn-based world map. Recruit armies, march them from province
+          to province, and fight every battle in real time or auto-resolve it. Your leader commands your main army:
+          if your leader falls, your campaign ends.</p>
+        <button id="cmp-new" class="primary">New Campaign</button>
+        <button id="cmp-continue">Continue Campaign</button>
+      </div>
+      <div id="sp-panel" class="panel hidden">
         <label>Opponent difficulty
           <select id="difficulty">
             <option value="easy">Easy</option>
@@ -83,6 +91,31 @@
     <div id="chat" class="hidden"><input id="chat-input" maxlength="200" placeholder="Say something… (Enter to send)"></div>
   </div>
 
+  <!-- World map -->
+  <div id="campaign" class="hidden">
+    <div id="cmp-top"><div id="cmp-top-info"></div><button id="cmp-end" class="primary">End Turn</button><button id="cmp-quit">Save &amp; Exit</button></div>
+    <div id="cmp-body">
+      <canvas id="cmp-map"></canvas>
+      <aside id="cmp-side"><div id="cmp-info"></div><h3>Chronicle</h3><div id="cmp-log"></div></aside>
+    </div>
+    <div id="cmp-toast" class="hidden"></div>
+  </div>
+  <div id="cmp-battle" class="overlay hidden">
+    <div class="dialog wide">
+      <h2 id="cmp-battle-title"></h2>
+      <div id="cmp-battle-sides"></div>
+      <p id="cmp-battle-odds"></p>
+      <div><button id="cmp-fight" class="primary">⚔️ Fight the Battle</button> <button id="cmp-auto">🎲 Auto-resolve</button></div>
+    </div>
+  </div>
+  <div id="cmp-over" class="overlay hidden">
+    <div class="dialog">
+      <h2 id="cmp-over-title"></h2>
+      <p id="cmp-over-reason"></p>
+      <button id="cmp-over-menu" class="primary">Main Menu</button>
+    </div>
+  </div>
+
   <div id="pause" class="overlay hidden">
     <div class="dialog">
       <h2 id="pause-title">Paused</h2>
@@ -107,8 +140,10 @@
   <script src="js/game.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/net.js"></script>
+  <script src="js/campaign.js"></script>
   <script src="js/render.js"></script>
   <script src="js/ui.js"></script>
+  <script src="js/campaign-ui.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

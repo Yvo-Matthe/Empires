@@ -52,7 +52,7 @@ function roomState(room) {
 }
 
 function cleanName(n) { return String(n || '').replace(/[^\w \-'.]/g, '').trim().slice(0, 16) || 'Lord'; }
-function cleanEmpire(e) { return S.EMPIRES[e] ? e : 'aldermark'; }
+function cleanEmpire(e) { return S.PLAYABLE_EMPIRES.includes(e) ? e : 'aldermark'; }
 function cleanTeam(t) { return Number.isInteger(t) && t >= 1 && t <= MAX_PLAYERS ? t : 1; }
 function freeTeam(room) {
   for (let t = 1; t <= MAX_PLAYERS; t++) if (!room.players.some((p) => p.team === t)) return t;
@@ -184,7 +184,7 @@ wss.on('connection', (ws) => {
       // Host-only lobby settings: AI players and difficulty.
       case 'addAi':
         if (isHost && !room.game && room.players.length < MAX_PLAYERS) {
-          const keys = Object.keys(S.EMPIRES);
+          const keys = S.PLAYABLE_EMPIRES;
           addPlayer(room, { ws: null, ai: true, name: aiName(room), empire: keys[Math.floor(Math.random() * keys.length)] });
           roomState(room);
         }

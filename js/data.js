@@ -158,6 +158,14 @@ function pickColor(preferred, used) {
   return c;
 }
 
+// Independent lords holding neutral provinces on the world map. Not playable.
+EMPIRES.rebels = {
+  name: 'Free Lords', motto: 'No crown above us', color: '#8a8f94', trim: '#3d3d3d', unique: 'spearman',
+  leader: 'Rebel Captain', hidden: true, description: 'Independent lords holding the borderlands.',
+  bonuses: [], weaknesses: [], mods: {},
+};
+const PLAYABLE_EMPIRES = Object.keys(EMPIRES).filter((k) => !EMPIRES[k].hidden);
+
 const DIFFICULTY = {
   easy: { name: 'Easy', gather: 0.8, firstAttack: 600, waveStart: 5, workers: 18 },
   normal: { name: 'Normal', gather: 1.0, firstAttack: 420, waveStart: 7, workers: 24 },

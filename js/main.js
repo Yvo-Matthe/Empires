@@ -25,7 +25,8 @@ function localCommands(game, pid) {
 function buildMenu() {
   const cards = $('empire-cards');
   cards.innerHTML = '';
-  for (const [key, emp] of Object.entries(EMPIRES)) {
+  for (const key of PLAYABLE_EMPIRES) {
+    const emp = EMPIRES[key];
     const u = UNITS[emp.unique];
     const card = document.createElement('button');
     card.className = 'empire-card';
@@ -46,10 +47,15 @@ function buildMenu() {
     t.onclick = () => {
       document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
       $('sp-panel').classList.toggle('hidden', t.dataset.tab !== 'sp');
+      $('cmp-panel').classList.toggle('hidden', t.dataset.tab !== 'cmp');
       $('mp-panel').classList.toggle('hidden', t.dataset.tab !== 'mp');
     };
   });
   $('start-sp').onclick = startSinglePlayer;
+  $('cmp-new').onclick = () => openCampaign(new Campaign({ empire: App.empire, seed: Math.floor(Math.random() * 1e6) }));
+  $('cmp-continue').onclick = () => { const st = loadCampaignSave(); if (st) openCampaign(new Campaign({ state: st })); };
+  $('cmp-over-menu').onclick = () => { $('cmp-over').classList.add('hidden'); App.campaignUI = null; showScreen('menu'); };
+  refreshContinue();
   $('mp-create').onclick = () => mpConnect({ t: 'create' });
   $('mp-join').onclick = () => mpConnect({ t: 'join', code: $('mp-code').value });
   $('mp-start').onclick = () => App.net && App.net.send({ t: 'start' });
@@ -63,6 +69,39 @@ function buildMenu() {
   }
 }
 
+function refreshContinue() {
+  const st = loadCampaignSave();
+  $('cmp-continue').disabled = !st;
+  $('cmp-continue').textContent = st ? `Continue Campaign (${EMPIRES[st.empires[0]].name}, turn ${st.turn})` : 'Continue Campaign';
+}
+
+// ---------- world campaign ----------
+function openCampaign(campaign) {
+  showScreen('campaign');
+  App.campaignUI = new CampaignUI(campaign, {
+    onBattle: (setup, name) => {
+      const game = new Game({ ...setup, difficulty: 'normal' });
+      game.battleName = name;
+      launch(game, 0, localCommands(game, 0), 'sp');
+      App.session.campaign = true;
+    },
+    onQuit: () => { App.campaignUI = null; refreshContinue(); showScreen('menu'); },
+  });
+  App.campaignUI.resize();
+  App.campaignUI.refresh();
+  // A battle the AI started before the game was closed is replayed from the saved queue.
+  if (campaign.s.aiQueue) { const b = campaign.continueAi(); if (b) App.campaignUI.askBattle(b, true); App.campaignUI.afterAction(); }
+}
+
+function returnToCampaign(retreat) {
+  const s = App.session;
+  if (s) s.ui.unbind();
+  App.session = null;
+  showScreen('campaign');
+  App.campaignUI.resize();
+  App.campaignUI.battleOver(retreat ? null : s.game.survivors(), !retreat && s.game.over && s.game.over.winner === 0, retreat);
+}
+
 function selectEmpire(key) {
   App.empire = key;
   document.querySelectorAll('.empire-card').forEach((c) => c.classList.toggle('selected', c.dataset.key === key));
@@ -70,13 +109,14 @@ function selectEmpire(key) {
 }
 
 function showScreen(id) {
-  for (const s of ['menu', 'pause', 'end']) $(s).classList.toggle('hidden', s !== id);
-  $('app').classList.toggle('hidden', id === 'menu');
+  for (const s of ['menu', 'pause', 'end', 'campaign']) $(s).classList.toggle('hidden', s !== id);
+  $('app').classList.toggle('hidden', id === 'menu' || id === 'campaign');
+  if (id === 'menu') refreshContinue();
 }
 
 // ---------- single player ----------
 function startSinglePlayer() {
-  const other = Object.keys(EMPIRES).find((k) => k !== App.empire) || App.empire;
+  const other = PLAYABLE_EMPIRES.find((k) => k !== App.empire) || App.empire;
   const game = new Game({
     seed: Math.floor(Math.random() * 1e9),
     empires: [App.empire, other],
@@ -138,8 +178,8 @@ function renderLobby() {
     if (!p) { rows.push(`<tr class="open"><td colspan="4">Open slot: share the code or add an AI player</td></tr>`); continue; }
     const editable = i === App.slot || (App.host && p.ai);
     const color = pickColor(EMPIRES[p.empire].color, used);
-    const empireSel = `<select data-i="${i}" data-f="empire" ${editable ? '' : 'disabled'}>${Object.entries(EMPIRES)
-      .map(([k, e]) => `<option value="${k}" ${k === p.empire ? 'selected' : ''}>${e.name}</option>`).join('')}</select>`;
+    const empireSel = `<select data-i="${i}" data-f="empire" ${editable ? '' : 'disabled'}>${PLAYABLE_EMPIRES
+      .map((k) => `<option value="${k}" ${k === p.empire ? 'selected' : ''}>${EMPIRES[k].name}</option>`).join('')}</select>`;
     const teamSel = `<select data-i="${i}" data-f="team" ${editable ? '' : 'disabled'}>${Array.from({ length: l.max }, (_, t) =>
       `<option value="${t + 1}" ${t + 1 === p.team ? 'selected' : ''}>Team ${t + 1}</option>`).join('')}</select>`;
     const who = `<span class="dot" style="background:${color}"></span><b>${escapeHtml(p.name)}</b>${p.ai ? ' 🤖' : ''}${i === App.slot ? ' (you)' : ''}`;
@@ -192,11 +232,14 @@ function launch(game, player, cmd, mode) {
   const ui = new UI({ game, renderer, cmd, player, multiplayer: mode === 'mp', onPause: () => togglePause() });
   App.session = { game, renderer, ui, mode, paused: false, acc: 0, last: performance.now(), miniT: 0, ended: false };
   resize();
-  const tc = game.entities.find((e) => e.owner === player && e.type === 'towncenter');
-  renderer.centerOn(tc.x, tc.y + 40);
+  const mine = game.entities.filter((e) => e.owner === player);
+  const tc = mine.find((e) => e.type === 'towncenter');
+  if (tc) renderer.centerOn(tc.x, tc.y + 40);
+  else renderer.centerOn(mine.reduce((t, e) => t + e.x, 0) / mine.length + 200, mine.reduce((t, e) => t + e.y, 0) / mine.length - 150);
   ui.select(game.entities.filter((e) => e.owner === player && e.entity === 'unit'));
   $('chat').classList.add('hidden');
-  if (mode === 'sp') ui.message(`Long live the ${game.players[player].empire.name}! Keep ${game.players[player].empire.leader} alive and defeat the enemy leader.`);
+  if (game.battle) ui.message(`${game.battleName}! Lead your army and keep ${game.players[player].empire.leader} alive.`);
+  else if (mode === 'sp') ui.message(`Long live the ${game.players[player].empire.name}! Keep ${game.players[player].empire.leader} alive and defeat the enemy leader.`);
 }
 
 function togglePause() {
@@ -206,11 +249,13 @@ function togglePause() {
   if (showing) { $('pause').classList.add('hidden'); s.paused = false; return; }
   s.paused = s.mode === 'sp';
   $('pause-title').textContent = s.mode === 'sp' ? 'Paused' : 'Menu';
+  $('quit').textContent = s.campaign ? 'Retreat (auto-resolve the battle)' : 'Quit to Main Menu';
   $('pause').classList.remove('hidden');
 }
 
 function quitToMenu() {
   const s = App.session;
+  if (s && s.campaign) { $('pause').classList.add('hidden'); returnToCampaign(!s.ended); return; }
   if (s) s.ui.unbind();
   App.session = null;
   if (App.net) mpDisconnect();
@@ -230,6 +275,7 @@ function showEnd() {
     [['Units trained', 'trained'], ['Enemies killed', 'killed'], ['Units/buildings lost', 'lost'], ['Resources gathered', 'gathered'], ['Buildings built', 'built']]
       .map(([label, k]) => `<tr><td>${label}</td>${g.players.map((p) => `<td>${Math.floor(p.stats[k])}</td>`).join('')}</tr>`).join('') +
     `<tr><td>Game time</td><td colspan="${g.players.length}">${Math.floor(t / 60)}m ${t % 60}s</td></tr>`;
+  $('end-menu').textContent = s.campaign ? 'Return to World Map' : 'Main Menu';
   $('end').classList.remove('hidden');
 }
 
@@ -238,12 +284,13 @@ function resize() {
   c.width = c.clientWidth;
   c.height = c.clientHeight;
   if (App.session) App.session.renderer.clampCam();
+  if (App.campaignUI) App.campaignUI.resize();
 }
 
 function frame(now) {
   requestAnimationFrame(frame);
   const s = App.session;
-  if (!s) return;
+  if (!s) { if (App.campaignUI && !$('campaign').classList.contains('hidden')) App.campaignUI.draw(); return; }
   const dt = Math.min(0.1, (now - s.last) / 1000);
   s.last = now;
   const g = s.game;

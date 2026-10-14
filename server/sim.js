@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const SIM_FILES = ['util.js', 'data.js', 'map.js', 'pathfinding.js', 'game.js', 'ai.js', 'net.js'];
+const SIM_FILES = ['util.js', 'data.js', 'map.js', 'pathfinding.js', 'game.js', 'ai.js', 'net.js', 'campaign.js'];
 
 function loadSim() {
   const ctx = vm.createContext({ console, Math, Date });
@@ -15,7 +15,7 @@ function loadSim() {
   }
   // Script-level const/class declarations are not properties of the context, so collect them.
   return vm.runInContext(`({ Game, Pathfinder, generateMap, mapConnected, makeSnapshot, EMPIRES, UNITS, BUILDINGS,
-    DIFFICULTY, TILE, MAP_W, MAP_H, TICK, START_POS, MAX_PLAYERS })`, ctx);
+    DIFFICULTY, TILE, MAP_W, MAP_H, TICK, START_POS, MAX_PLAYERS, PLAYABLE_EMPIRES, Campaign, PROVINCES, armySize })`, ctx);
 }
 
 module.exports = { loadSim };

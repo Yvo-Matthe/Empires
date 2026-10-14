@@ -42,6 +42,7 @@ class AIController {
     const army = units.filter((u) => !u.def.worker && u.type !== 'leader');
     const leader = units.find((u) => u.type === 'leader');
     const blds = mine.filter((e) => e.entity === 'building');
+    if (g.battle) { this.battleThink(army, leader); return; }
     const home = this.home();
     if (!home) return;
     this.ctx = { p, peasants, army, blds, home };
@@ -53,6 +54,29 @@ class AIController {
     this.assignIdle();
     this.trainArmy();
     this.useArmy();
+  }
+
+  // Battle mode: advance on the enemy army, keeping the leader a little behind the line.
+  battleThink(army, leader) {
+    const g = this.g;
+    const foes = g.entities.filter((e) => e.entity === 'unit' && !e.dead && g.isEnemy(this.pid, e.owner));
+    if (!foes.length) return;
+    const near = (from) => foes.reduce((b, e) => (dist(e.x, e.y, from.x, from.y) < dist(b.x, b.y, from.x, from.y) ? e : b));
+    const idle = army.filter((u) => !u.order);
+    if (idle.length) {
+      const t = near(idle[0]);
+      g.cmdMove(idle, t.x, t.y, true);
+    }
+    if (leader && (!leader.order || leader.order.type === 'move')) {
+      const threat = near(leader);
+      if (!army.length || dist(threat.x, threat.y, leader.x, leader.y) < 4 * TILE) {
+        if (!leader.order) g.cmdAttack([leader], threat);
+      } else if (this.rng() < 0.3) {
+        const cx = army.reduce((s, u) => s + u.x, 0) / army.length, cy = army.reduce((s, u) => s + u.y, 0) / army.length;
+        const a = Math.atan2(cy - threat.y, cx - threat.x);
+        g.cmdMove([leader], cx + Math.cos(a) * 3 * TILE, cy + Math.sin(a) * 3 * TILE);
+      }
+    }
   }
 
   // The AI keeps its leader safe behind its Town Center.

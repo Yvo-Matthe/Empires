@@ -3,6 +3,8 @@
 A medieval real-time strategy game for the PC, played in the browser. Build up an economy,
 raise an army and tear down the enemy's Town Center, against the computer or against a friend.
 
+![An Aldermark town fourteen minutes into a match](docs/screenshot.png)
+
 ## Play
 
 **Single player** needs nothing installed: open `index.html` in Chrome, Edge or Firefox.

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Empires: Age of Crowns</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Main menu -->
+  <div id="menu" class="overlay menu">
+    <div class="menu-inner">
+      <h1>EMPIRES</h1>
+      <div class="subtitle">Age of Crowns</div>
+      <h2>Choose your empire</h2>
+      <div id="empire-cards" class="cards"></div>
+      <div class="tabs">
+        <button class="tab active" data-tab="cmp">World Campaign</button>
+        <button class="tab" data-tab="sp">Skirmish</button>
+        <button class="tab" data-tab="mp">Multiplayer</button>
+      </div>
+      <div id="cmp-panel" class="panel">
+        <p class="notice">Rule a country on a real-time world map. Gold comes in every month; recruit armies, march
+          them along the roads and fight every battle in real time or auto-resolve it. At the end of every year the
+          World Council votes: win a majority and you are elected World Leader. Your leader commands your main army:
+          if your leader falls, your reign ends. For co-op or versus worlds with friends, open the Multiplayer tab.</p>
+        <label>One game year lasts <select id="cmp-year" class="year-select"></select></label>
+        <button id="cmp-new" class="primary">New Campaign</button>
+        <button id="cmp-continue">Continue Campaign</button>
+      </div>
+      <div id="sp-panel" class="panel hidden">
+        <label>Opponent difficulty
+          <select id="difficulty">
+            <option value="easy">Easy</option>
+            <option value="normal" selected>Normal</option>
+            <option value="hard">Hard</option>
+          </select>
+        </label>
+        <button id="start-sp" class="primary">Start Battle</button>
+      </div>
+      <div id="mp-panel" class="panel hidden">
+        <div id="mp-offline" class="hidden notice">
+          Multiplayer needs the game server. Run <code>npm install</code> and <code>npm start</code>,
+          then open <code>http://localhost:8080</code>. Friends join from <code>http://&lt;your-ip&gt;:8080</code>.
+        </div>
+        <div id="mp-form">
+          <label>Your name <input id="mp-name" maxlength="16" placeholder="Lord"></label>
+          <button id="mp-create" class="primary">Create Battle Room</button>
+          <button id="mp-create-world" class="primary">Create World</button>
+          <label class="inline">year <select id="mp-year" class="year-select"></select></label>
+          <span class="or">or</span>
+          <input id="mp-code" maxlength="4" placeholder="CODE" class="code-input">
+          <button id="mp-join">Join</button>
+          <div class="hint">A <b>battle room</b> is one real-time match for up to 4 players and AI. A <b>world</b> is a
+            campaign on the world map that keeps going between sessions: pick the same empire as a friend to rule it
+            together (co-op), or the other empire to fight each other. To come back later, join with the same code and name.</div>
+        </div>
+        <div id="mp-lobby" class="hidden">
+          <div>Room code: <b id="mp-room-code" class="room-code"></b> <span class="hint">Share this code with the other players.</span></div>
+          <table id="mp-players"></table>
+          <div id="mp-host-tools">
+            <button id="mp-add-ai">Add AI Player</button>
+            <label>AI difficulty
+              <select id="mp-difficulty">
+                <option value="easy">Easy</option>
+                <option value="normal" selected>Normal</option>
+                <option value="hard">Hard</option>
+              </select>
+            </label>
+          </div>
+          <div class="hint">Players on the same team are allies. Up to 4 players, humans and AI in any mix.</div>
+          <button id="mp-start" class="primary">Start Battle</button>
+          <span id="mp-wait" class="hint">Waiting for the host to start…</span>
+          <button id="mp-leave">Leave Room</button>
+        </div>
+        <div id="mp-status" class="status"></div>
+      </div>
+      <div class="help">
+        <b>Controls:</b> left-click / drag to select · right-click to move, gather, build or attack ·
+        arrow keys or screen edges to scroll · mouse wheel to zoom · <b>H</b> Town Center · <b>L</b> leader · <b>.</b> idle villager ·
+        <b>Ctrl+1-9</b> set group · <b>1-9</b> select group · <b>Q W E R / A S D F / Z X C V</b> command buttons ·
+        <b>Shift</b> queue placements · <b>Del</b> delete · <b>P</b> pause
+      </div>
+    </div>
+  </div>
+
+  <!-- Game -->
+  <div id="app" class="hidden">
+    <div id="topbar"></div>
+    <canvas id="view"></canvas>
+    <div id="bottom">
+      <div id="minimap-wrap"><canvas id="minimap" width="176" height="176"></canvas></div>
+      <div id="info"></div>
+      <div id="commands"></div>
+    </div>
+    <div id="messages"></div>
+    <div id="tooltip" class="hidden"></div>
+    <div id="chat" class="hidden"><input id="chat-input" maxlength="200" placeholder="Say something… (Enter to send)"></div>
+  </div>
+
+  <!-- World map -->
+  <div id="campaign" class="hidden">
+    <div id="cmp-top"><div id="cmp-top-info"></div>
+      <div id="cmp-speed"><button data-speed="0" title="Pause">⏸</button><button data-speed="1">1×</button><button data-speed="4">4×</button><button data-speed="16">16×</button></div><button id="cmp-quit">Save &amp; Exit</button></div>
+    <div id="cmp-body">
+      <canvas id="cmp-map"></canvas>
+      <aside id="cmp-side"><div id="cmp-info"></div><h3>Chronicle</h3>
+        <div id="cmp-chat" class="hidden"><input id="cmp-chat-input" maxlength="200" placeholder="Message your fellow rulers… (Enter)"></div>
+        <div id="cmp-log"></div></aside>
+    </div>
+    <div id="cmp-toast" class="hidden"></div>
+  </div>
+  <div id="cmp-battle" class="overlay hidden">
+    <div class="dialog wide">
+      <h2 id="cmp-battle-title"></h2>
+      <div id="cmp-battle-sides"></div>
+      <p id="cmp-battle-odds"></p>
+      <p id="cmp-battle-timer" class="muted"></p>
+      <div><button id="cmp-fight" class="primary">⚔️ Fight the Battle</button> <button id="cmp-auto">🎲 Auto-resolve</button></div>
+    </div>
+  </div>
+  <div id="cmp-over" class="overlay hidden">
+    <div class="dialog">
+      <h2 id="cmp-over-title"></h2>
+      <p id="cmp-over-reason"></p>
+      <button id="cmp-over-menu" class="primary">Main Menu</button>
+    </div>
+  </div>
+
+  <div id="pause" class="overlay hidden">
+    <div class="dialog">
+      <h2 id="pause-title">Paused</h2>
+      <button id="resume" class="primary">Resume</button>
+      <button id="quit">Quit to Main Menu</button>
+    </div>
+  </div>
+
+  <div id="end" class="overlay hidden">
+    <div class="dialog">
+      <h2 id="end-title"></h2>
+      <p id="end-reason"></p>
+      <table id="end-stats"></table>
+      <button id="end-menu" class="primary">Main Menu</button>
+    </div>
+  </div>
+
+  <script src="js/util.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/pathfinding.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/campaign.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/campaign-ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

@@ -6,6 +6,8 @@ Total War. Every player has a **leader**; if the leader dies, that player is out
 
 ![An Aldermark town fourteen minutes into a match](docs/screenshot.png)
 
+![The world map campaign](docs/world-map.png)
+
 ## Play
 
 **Single player** needs nothing installed: open `index.html` in Chrome, Edge or Firefox.

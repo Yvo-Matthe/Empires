@@ -70,6 +70,9 @@ function buildMenu() {
   $('mp-difficulty').onchange = (e) => App.net && App.net.send({ t: 'difficulty', difficulty: e.target.value });
   $('mp-leave').onclick = () => mpDisconnect();
   try { $('mp-name').value = localStorage.getItem('empires.name') || ''; } catch { /* storage unavailable */ }
+  if (location.protocol !== 'file:') {
+    fetch('info').then((r) => r.json()).then((info) => { if (info.serverPassword) $('mp-server-pw-row').classList.remove('hidden'); }).catch(() => {});
+  }
   if (location.protocol === 'file:') {
     $('mp-offline').classList.remove('hidden');
     $('mp-form').classList.add('hidden');
@@ -159,7 +162,10 @@ async function mpConnect(first) {
   if (!App.net) {
     App.net = new NetClient();
     try { await App.net.connect(); } catch (err) { App.net = null; setMpStatus(err.message, true); return; }
-    App.net.on('error', (m) => setMpStatus(m.text, true));
+    App.net.on('error', (m) => {
+      if (m.serverPassword) $('mp-server-pw-row').classList.remove('hidden');
+      setMpStatus(m.text, true);
+    });
     App.net.on('lobby', (m) => { App.lobby = m; renderLobby(); });
     App.net.on('you', (m) => { App.slot = m.slot; App.host = m.host; renderLobby(); });
     App.net.on('start', (m) => mpStart(m));
@@ -169,7 +175,7 @@ async function mpConnect(first) {
       if (!ui || !ui.mp) {
         openCampaign(new World({ state: m.s, humans: [] }), { me: App.worldMe, net: App.net });
         App.campaignUI.setState(m);
-        App.campaignUI.toast(`World ${m.code}: share this code so friends can join. Rejoin later with the same code and name.`);
+        App.campaignUI.toast(`World ${m.code}${m.locked ? ' (password protected)' : ''}: share this code${m.locked ? ' and the password' : ''} so friends can join. Rejoin later with the same code, name${m.locked ? ' and password' : ''}.`);
       } else ui.setState(m);
     });
     App.net.on('close', () => {
@@ -187,7 +193,7 @@ async function mpConnect(first) {
       setMpStatus('Disconnected.', true);
     });
   }
-  App.net.send({ ...first, name, empire: App.empire });
+  App.net.send({ ...first, name, empire: App.empire, password: $('mp-pw').value, serverPassword: $('mp-server-pw').value });
   setMpStatus('');
 }
 
@@ -209,6 +215,7 @@ function renderLobby() {
   $('mp-lobby').classList.toggle('hidden', !l);
   if (!l) return;
   $('mp-room-code').textContent = l.code;
+  $('mp-room-lock').classList.toggle('hidden', !l.locked);
   const used = [];
   const rows = [];
   for (let i = 0; i < l.max; i++) {

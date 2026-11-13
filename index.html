@@ -45,6 +45,9 @@
         </div>
         <div id="mp-form">
           <label>Your name <input id="mp-name" maxlength="16" placeholder="Lord"></label>
+          <label id="mp-server-pw-row" class="hidden">Server password <input id="mp-server-pw" type="password" maxlength="64" autocomplete="current-password"></label>
+          <label>Password <input id="mp-pw" type="password" maxlength="64" placeholder="optional" autocomplete="new-password"
+            title="When you create a room or world, only players who know this password can join or rejoin it. Leave empty for an open room. When you join, type the room's password."></label>
           <button id="mp-create" class="primary">Create Battle Room</button>
           <button id="mp-create-world" class="primary">Create World</button>
           <label class="inline">year <select id="mp-year" class="year-select"></select></label>
@@ -53,10 +56,11 @@
           <button id="mp-join">Join</button>
           <div class="hint">A <b>battle room</b> is one real-time match for up to 4 players and AI. A <b>world</b> is a
             campaign on the world map that keeps going between sessions: pick the same empire as a friend to rule it
-            together (co-op), or the other empire to fight each other. To come back later, join with the same code and name.</div>
+            together (co-op), or the other empire to fight each other. To come back later, join with the same code and name.
+            Set a <b>password</b> when you create a room or world so only the friends you give it to can join; they need it to rejoin too.</div>
         </div>
         <div id="mp-lobby" class="hidden">
-          <div>Room code: <b id="mp-room-code" class="room-code"></b> <span class="hint">Share this code with the other players.</span></div>
+          <div>Room code: <b id="mp-room-code" class="room-code"></b> <span id="mp-room-lock" class="hint hidden">🔒 password protected</span> <span class="hint">Share this code with the other players.</span></div>
           <table id="mp-players"></table>
           <div id="mp-host-tools">
             <button id="mp-add-ai">Add AI Player</button>

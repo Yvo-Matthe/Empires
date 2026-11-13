@@ -46,6 +46,23 @@ To play over the internet, forward port 8080 on the host's router or deploy the 
 to any Node host (set `PORT` if needed). The server runs the authoritative simulation,
 so a player can only command their own units.
 
+**Keeping strangers out.** Knowing a four-letter code is not much protection, so there are two locks:
+
+- **Room and world passwords.** Type a password before you press **Create Battle Room** or
+  **Create World**. Players then need the code *and* the password to join, and to rejoin a world
+  later. The lobby shows 🔒 when a room is locked. Leave it empty for an open room.
+- **Server password.** Start the server with a password and nobody can create or join anything
+  without it (the menu then shows a **Server password** field):
+
+  ```sh
+  EMPIRES_PASSWORD=your-secret npm start
+  ```
+
+Passwords are stored only as salted hashes. After 5 wrong passwords or room codes within a minute,
+that address has to wait a minute before trying again. Worlds created before this change stay
+open (they have no password). If you play over the internet, put the server behind HTTPS (for
+example a reverse proxy) so passwords are not sent in plain text.
+
 ## Modes
 
 - **World Campaign:** rule a country on a real-time world map. The calendar runs (pause it or

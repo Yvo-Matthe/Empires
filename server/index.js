@@ -2,9 +2,12 @@
 // Empires game server: serves the game files and hosts multiplayer battle rooms and
 // multiplayer world campaigns (versus or co-op, saved to disk so players can rejoin).
 // Usage: npm start  (then open http://localhost:8080, or http://<your-ip>:8080 from another PC)
+// Access: hosts can lock a room or world with a password, and EMPIRES_PASSWORD=... locks the
+// whole server so only people who know it can create or join anything.
 
 const http = require('http');
 const fs = require('fs');
+const crypto = require('crypto');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const { loadSim } = require('./sim');
@@ -18,11 +21,18 @@ const WORLD_DIR = process.env.WORLD_DIR || path.join(ROOT, 'data', 'worlds');
 // Test knobs: run world clocks and battles faster than real time.
 const WORLD_SPEED = Number(process.env.WORLD_SPEED) || 1;
 const MATCH_SPEED = Number(process.env.MATCH_SPEED) || 1;
+const SERVER_PASSWORD = process.env.EMPIRES_PASSWORD || '';
 const PUBLIC = ['index.html', 'style.css', 'js'];
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
 
 // ---------- static files ----------
 const server = http.createServer((req, res) => {
+  if (req.url === '/info') {
+    // Tells the menu whether to ask for the server password.
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+    res.end(JSON.stringify({ serverPassword: !!SERVER_PASSWORD }));
+    return;
+  }
   let rel = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/+/, '') || 'index.html';
   const file = path.normalize(path.join(ROOT, rel));
   rel = path.relative(ROOT, file);
@@ -38,6 +48,7 @@ const server = http.createServer((req, res) => {
 function send(ws, msg) { if (ws && ws.readyState === 1) ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg)); }
 function cleanName(n) { return String(n || '').replace(/[^\w \-'.]/g, '').trim().slice(0, 16) || 'Lord'; }
 function cleanEmpire(e) { return S.PLAYABLE_EMPIRES.includes(e) ? e : 'aldermark'; }
+function cleanPassword(p) { return typeof p === 'string' ? p.slice(0, 64) : ''; }
 function cleanTeam(t) { return Number.isInteger(t) && t >= 1 && t <= MAX_PLAYERS ? t : 1; }
 
 // ---------- matches: one running real-time game and the sockets playing it ----------
@@ -121,6 +132,45 @@ class Match {
   }
 }
 
+// ---------- passwords ----------
+// Room and world passwords are kept as salted scrypt hashes (worlds are saved to disk).
+function hashPassword(pw) {
+  if (!pw) return null;
+  const salt = crypto.randomBytes(16).toString('hex');
+  return { salt, hash: crypto.scryptSync(pw, salt, 32).toString('hex') };
+}
+function checkHash(stored, pw) {
+  if (!stored) return true;
+  const got = crypto.scryptSync(String(pw || ''), stored.salt, 32);
+  const want = Buffer.from(stored.hash, 'hex');
+  return got.length === want.length && crypto.timingSafeEqual(got, want);
+}
+function checkServerPassword(pw) {
+  if (!SERVER_PASSWORD) return true;
+  const a = crypto.createHash('sha256').update(String(pw || '')).digest();
+  const b = crypto.createHash('sha256').update(SERVER_PASSWORD).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+// Slow down guessing: after 5 wrong passwords or room codes within a minute, an address must wait a minute.
+const MAX_FAILS = 5, LOCKOUT_MS = 60000;
+const failures = new Map(); // ip -> { count, since, until }
+function lockedOut(ip) {
+  const f = failures.get(ip);
+  return !!(f && f.until > Date.now());
+}
+function noteFailure(ip) {
+  const now = Date.now();
+  let f = failures.get(ip);
+  if (!f || now - f.since > LOCKOUT_MS) f = { count: 0, since: now, until: 0 };
+  if (++f.count >= MAX_FAILS) f.until = now + LOCKOUT_MS;
+  failures.set(ip, f);
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, f] of failures) if (f.until < now && now - f.since > LOCKOUT_MS) failures.delete(ip);
+}, LOCKOUT_MS).unref();
+
 // ---------- rooms (battle lobbies) and worlds share one code space ----------
 const rooms = new Map();
 
@@ -137,7 +187,7 @@ function broadcast(room, msg) { const s = JSON.stringify(msg); for (const p of r
 
 function roomState(room) {
   broadcast(room, {
-    t: 'lobby', code: room.code, difficulty: room.difficulty, max: MAX_PLAYERS,
+    t: 'lobby', code: room.code, difficulty: room.difficulty, max: MAX_PLAYERS, locked: !!room.password,
     players: room.players.map((p) => ({ name: p.name, empire: p.empire, team: p.team, ai: !!p.ai })),
   });
   room.players.forEach((p, i) => send(p.ws, { t: 'you', slot: i, host: p.ws === room.host }));
@@ -247,7 +297,7 @@ function worldFile(code) { return path.join(WORLD_DIR, `${code}.json`); }
 function saveWorld(wr) {
   try {
     fs.mkdirSync(WORLD_DIR, { recursive: true });
-    const data = { code: wr.code, s: wr.w.s, players: wr.players.map((p) => ({ name: p.name, country: p.country })) };
+    const data = { code: wr.code, password: wr.password || null, s: wr.w.s, players: wr.players.map((p) => ({ name: p.name, country: p.country })) };
     fs.writeFileSync(worldFile(wr.code) + '.tmp', JSON.stringify(data));
     fs.renameSync(worldFile(wr.code) + '.tmp', worldFile(wr.code));
     wr.savedAt = Date.now();
@@ -263,14 +313,15 @@ function loadWorlds() {
       if (!data.s || data.s.version !== 3 || data.s.over) continue;
       const wr = makeWorldRoom(data.code, new S.World({ state: data.s, humans: [] }));
       wr.players = data.players.map((p) => ({ ...p, ws: null }));
+      wr.password = data.password || null;
       // Battles that were being fought when the server stopped are settled by the dice.
       for (const b of [...wr.w.s.battles]) if (b.state === 'fighting') wr.w.autoResolve(b);
     } catch (err) { console.error('Could not load world', f, err.message); }
   }
 }
 
-function makeWorldRoom(code, w) {
-  const wr = { kind: 'world', code, w, players: [], battles: new Map(), lastSent: 0, savedAt: Date.now() };
+function makeWorldRoom(code, w, password = null) {
+  const wr = { kind: 'world', code, w, password, players: [], battles: new Map(), lastSent: 0, savedAt: Date.now() };
   rooms.set(code, wr);
   wr.timer = setInterval(() => worldTick(wr, 0.25), 250);
   return wr;
@@ -280,7 +331,7 @@ function worldHumans(wr) { return new Set(wr.players.filter((p) => p.ws).map((p)
 
 function worldState(wr) {
   const msg = JSON.stringify({
-    t: 'world', code: wr.code, s: wr.w.s,
+    t: 'world', code: wr.code, locked: !!wr.password, s: wr.w.s,
     players: wr.players.map((p) => ({ name: p.name, country: p.country, online: !!p.ws, battle: !!(p.ws && p.ws.match) })),
   });
   for (const p of wr.players) send(p.ws, msg);
@@ -404,15 +455,25 @@ function leaveAll(ws) {
 }
 
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  const ip = req.socket.remoteAddress || '?';
+  // The server password is checked on every create and join; a wrong one counts as a failed guess.
+  const allowed = (m) => {
+    if (lockedOut(ip)) { send(ws, { t: 'error', text: 'Too many wrong passwords. Wait a minute and try again.' }); return false; }
+    if (checkServerPassword(m.serverPassword)) return true;
+    noteFailure(ip);
+    send(ws, { t: 'error', text: m.serverPassword ? 'Wrong server password.' : 'This server needs a password.', serverPassword: true });
+    return false;
+  };
   ws.on('message', (raw) => {
     let m;
     try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m !== 'object') return;
+    if ((m.t === 'create' || m.t === 'createWorld' || m.t === 'join') && !allowed(m)) return;
     switch (m.t) {
       case 'create': {
         leaveAll(ws);
-        const r = { kind: 'room', code: newCode(), players: [], match: null, host: ws, difficulty: 'normal' };
+        const r = { kind: 'room', code: newCode(), players: [], match: null, host: ws, difficulty: 'normal', password: hashPassword(cleanPassword(m.password)) };
         rooms.set(r.code, r);
         r.players.push({ team: 1, ws, name: cleanName(m.name), empire: cleanEmpire(m.empire) });
         ws.room = r;
@@ -423,12 +484,18 @@ wss.on('connection', (ws) => {
         leaveAll(ws);
         const empire = cleanEmpire(m.empire);
         const w = new S.World({ empire, seed: Math.floor(Math.random() * 1e6), yearLen: S.yearLength(m.year), humans: [] });
-        joinWorld(ws, makeWorldRoom(newCode(), w), cleanName(m.name), empire);
+        joinWorld(ws, makeWorldRoom(newCode(), w, hashPassword(cleanPassword(m.password))), cleanName(m.name), empire);
         return;
       }
       case 'join': {
         const r = rooms.get(String(m.code || '').toUpperCase().trim());
-        if (!r) { send(ws, { t: 'error', text: 'No room or world with that code.' }); return; }
+        if (!r) { noteFailure(ip); send(ws, { t: 'error', text: 'No room or world with that code.' }); return; }
+        // Locked rooms and worlds need their password to join, and worlds need it again to rejoin.
+        if (!checkHash(r.password, cleanPassword(m.password))) {
+          noteFailure(ip);
+          send(ws, { t: 'error', text: m.password ? 'Wrong password for that room or world.' : 'That room or world needs a password.' });
+          return;
+        }
         if (r.kind === 'world') {
           if (r.w.s.over) { send(ws, { t: 'error', text: 'That war is over.' }); return; }
           leaveAll(ws);

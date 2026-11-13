@@ -172,5 +172,72 @@ test('a multiplayer world: co-op rulers, a rival, real-time battles and rejoinin
   assert.ok(back.s.time >= date - 1);
   assert.strictEqual(back.s.provinces[5].owner, 0);
   d.ws.close();
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+});
+
+test('passwords: locked rooms and worlds, rejoining, a server password and guess limits', async (t) => {
+  const fs = require('fs');
+  const os = require('os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'empires-worlds-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  const port = PORT + 10;
+  await startServer(t, port, { WORLD_DIR: dir, EMPIRES_PASSWORD: 'castle' });
+  const info = await (await fetch(`http://localhost:${port}/info`)).json();
+  assert.strictEqual(info.serverPassword, true);
+  const sp = 'castle';
+
+  const a = client(port), b = client(port), c = client(port);
+  await Promise.all([a.open, b.open, c.open]);
+
+  // No server password, no entry.
+  a.send({ t: 'create', name: 'Host', empire: 'aldermark' });
+  const e0 = await a.next('error');
+  assert.ok(e0.serverPassword);
+  assert.match(e0.text, /needs a password/);
+
+  // A locked battle room.
+  a.send({ t: 'create', name: 'Host', empire: 'aldermark', password: 'moat', serverPassword: sp });
+  const lobby = await a.next('lobby');
+  assert.strictEqual(lobby.locked, true);
+  b.send({ t: 'join', code: lobby.code, name: 'Guest', empire: 'valmont', serverPassword: sp });
+  assert.match((await b.next('error')).text, /needs a password/);
+  b.send({ t: 'join', code: lobby.code, name: 'Guest', empire: 'valmont', password: 'wall', serverPassword: sp });
+  assert.match((await b.next('error')).text, /Wrong password/);
+  b.send({ t: 'join', code: lobby.code, name: 'Guest', empire: 'valmont', password: 'moat', serverPassword: sp });
+  await a.next('lobby', (l) => l.players.length === 2);
+
+  // A locked world: the password is needed to join and to rejoin, also after a restart.
+  c.send({ t: 'createWorld', name: 'Anna', empire: 'aldermark', year: 'quick', password: 'keep', serverPassword: sp });
+  const w = await c.next('world');
+  assert.strictEqual(w.locked, true);
+  c.ws.close();
+  await new Promise((r) => setTimeout(r, 200));
+  const saved = fs.readFileSync(path.join(dir, `${w.code}.json`), 'utf8');
+  assert.ok(!saved.includes('"keep"'), 'the world password is not saved in plain text');
+
+  const d = client(port);
+  await d.open;
+  d.send({ t: 'join', code: w.code, name: 'Anna', empire: 'aldermark', serverPassword: sp });
+  assert.match((await d.next('error')).text, /needs a password/);
+  d.send({ t: 'join', code: w.code, name: 'Anna', empire: 'aldermark', password: 'keep', serverPassword: sp });
+  assert.strictEqual((await d.next('wyou')).country, 0);
+  d.ws.close();
+  await new Promise((r) => setTimeout(r, 200));
+
+  await startServer(t, port + 1, { WORLD_DIR: dir });
+  const e = client(port + 1);
+  await e.open;
+  e.send({ t: 'join', code: w.code, name: 'Anna', empire: 'aldermark', password: 'nope' });
+  assert.match((await e.next('error')).text, /Wrong password/);
+  e.send({ t: 'join', code: w.code, name: 'Anna', empire: 'aldermark', password: 'keep' });
+  assert.strictEqual((await e.next('wyou')).country, 0);
+
+  // Guessing codes or passwords gets an address locked out for a minute.
+  const g = client(port + 1);
+  await g.open;
+  for (let i = 0; i < 5; i++) g.send({ t: 'join', code: 'ZZZZ', name: 'Spy' });
+  for (let i = 0; i < 5; i++) await g.next('error');
+  g.send({ t: 'join', code: w.code, name: 'Spy', password: 'keep' });
+  assert.match((await g.next('error')).text, /Too many/);
+  for (const x of [a, b, e, g]) x.ws.close();
 });
